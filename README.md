@@ -9,9 +9,10 @@ Step 1: You need to install the BLAST search algorithm and database on your loca
 The version I chose is: blastn: 2.16.0+.
 
 Step 2:After downloading BLAST, you also need to download the ref_viruses_rep_genomes virus database.
-(Note: The download command in macOS terminal is
+Note: The download command in macOS terminal is
+
 update_blastdb.pl --decompress ref_viruses_rep_genomes
-blastn -query query.fasta -db ref_viruses_rep_genomes -out result.txt)
+blastn -query query.fasta -db ref_viruses_rep_genomes -out result.txt
 
 I am responsible for the front-end (Vue.js, javascript, html, css) and back-end (Java, SpringBoot) code of VDRST. Besides me, the Prototype of this project is designed by Tang Bingni, and for the expertise in the field of biology of this project, I would like to thank Tan Ke Qi, who has been working in the field of biology for a long time. Zhong Wen Pei, Teh Wen Xuan, Commettant Neil Jude, Huang ZhouXiang for their help.
 

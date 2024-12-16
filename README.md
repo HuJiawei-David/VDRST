@@ -15,6 +15,4 @@ update_blastdb.pl --decompress ref_viruses_rep_genomes
 
 blastn -query query.fasta -db ref_viruses_rep_genomes -out result.txt
 
-I am responsible for the front-end (Vue.js, javascript, html, css) and back-end (Java, SpringBoot) code of VDRST. Besides me, the Prototype of this project is designed by Tang Bingni, and for the expertise in the field of biology of this project, I would like to thank Tan Ke Qi, who has been working in the field of biology for a long time. Zhong Wen Pei, Teh Wen Xuan, Commettant Neil Jude, Huang ZhouXiang for their help.
-
-Translated with DeepL.com (free version)
+I am responsible for the front-end (Vue.js, javascript, html, css) and back-end (Java, SpringBoot) code of VDRST. Besides me, the Prototype of this project is designed by Tang Bingni, and for the expertise in the field of biology of this project, I would like to thank Tan Ke Qi,Zhong Wen Pei, Teh Wen Xuan, Commettant Neil Jude, Huang ZhouXiang for their help. They are working in the field of biology for a long time.  

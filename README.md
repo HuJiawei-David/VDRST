@@ -1,6 +1,7 @@
 # VDRST
 VDRST, which its' full name called Virus DNA RNA Searching Tool. This repository demonstrate the front-end and backend code of VDRST. The Front-end is using vue.js framework, and html, css, JavaScript. Backend part used Java, and SpringBoot framework.
-VDRST is a DNA and RNA sequence search tool. When a user searches for a DNA or RNA sequence number, VDRST first calls the BLAST search algorithm to perform a basic similarity search, returning multiple similar sequences. The SmithWaterman algorithm is then used to perform a fine-grained similarity comparison, returning the three most similar sequences to the platform.
+
+When a user searches for a DNA or RNA sequence number, VDRST first calls the BLAST search algorithm to perform a basic similarity search, returning multiple similar sequences. The SmithWaterman algorithm is then used to perform a fine-grained similarity comparison, returning the three most similar sequences to the platform.
 
 You have two extra steps if you want to use this code:
 

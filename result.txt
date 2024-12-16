@@ -1,0 +1,209 @@
+BLASTN 2.16.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: Refseq viruses representative genomes
+           18,703 sequences; 552,047,339 total letters
+
+
+
+Query= UserInput
+
+Length=12
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NC_076433.1 Chicken genomovirus mg4_1173, complete genome             23.7    80   
+NC_077067.1 Fadolivirus 1 strain FV1/VV64, partial genome             23.7    80   
+NC_076728.1 Euproctis digramma nucleopolyhedrovirus, complete genome  23.7    80   
+NC_048757.1 Nodularia phage vB_NspS-kac68v161, complete genome        23.7    80   
+NC_048756.1 Nodularia phage vB_NspS-kac65v151, complete genome        23.7    80   
+NC_055523.1 Human lung-associated vientovirus FB, complete genome     23.7    80   
+NC_048049.1 Synechococcus phage S-T4, complete genome                 23.7    80   
+NC_037667.1 Pandoravirus quercus, complete genome                     23.7    80   
+NC_053512.1 Mycobacterium phage Kumao, complete genome                23.7    80   
+NC_048637.1 Bacteriophage vB_NpeS-2AV2, complete genome               23.7    80   
+
+
+>NC_076433.1 Chicken genomovirus mg4_1173, complete genome
+Length=2216
+
+ Score = 23.7 bits (12),  Expect = 80
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Plus
+
+Query  1   ACTGACTGACTG  12
+           ||||||||||||
+Sbjct  23  ACTGACTGACTG  34
+
+
+>NC_077067.1 Fadolivirus 1 strain FV1/VV64, partial genome
+Length=1573504
+
+ Score = 23.7 bits (12),  Expect = 80
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Plus
+
+Query  1        ACTGACTGACTG  12
+                ||||||||||||
+Sbjct  1545545  ACTGACTGACTG  1545556
+
+
+>NC_076728.1 Euproctis digramma nucleopolyhedrovirus, complete genome
+Length=161734
+
+ Score = 23.7 bits (12),  Expect = 80
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  1       ACTGACTGACTG  12
+               ||||||||||||
+Sbjct  113580  ACTGACTGACTG  113569
+
+
+ Score = 23.7 bits (12),  Expect = 80
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  1       ACTGACTGACTG  12
+               ||||||||||||
+Sbjct  113584  ACTGACTGACTG  113573
+
+
+ Score = 23.7 bits (12),  Expect = 80
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  1       ACTGACTGACTG  12
+               ||||||||||||
+Sbjct  113588  ACTGACTGACTG  113577
+
+
+ Score = 23.7 bits (12),  Expect = 80
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  1       ACTGACTGACTG  12
+               ||||||||||||
+Sbjct  113592  ACTGACTGACTG  113581
+
+
+ Score = 23.7 bits (12),  Expect = 80
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  1       ACTGACTGACTG  12
+               ||||||||||||
+Sbjct  113596  ACTGACTGACTG  113585
+
+
+>NC_048757.1 Nodularia phage vB_NspS-kac68v161, complete genome
+Length=145400
+
+ Score = 23.7 bits (12),  Expect = 80
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  1      ACTGACTGACTG  12
+              ||||||||||||
+Sbjct  22783  ACTGACTGACTG  22772
+
+
+>NC_048756.1 Nodularia phage vB_NspS-kac65v151, complete genome
+Length=146618
+
+ Score = 23.7 bits (12),  Expect = 80
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  1      ACTGACTGACTG  12
+              ||||||||||||
+Sbjct  21631  ACTGACTGACTG  21620
+
+
+>NC_055523.1 Human lung-associated vientovirus FB, complete genome
+Length=3056
+
+ Score = 23.7 bits (12),  Expect = 80
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  1     ACTGACTGACTG  12
+             ||||||||||||
+Sbjct  2916  ACTGACTGACTG  2905
+
+
+>NC_048049.1 Synechococcus phage S-T4, complete genome
+Length=181082
+
+ Score = 23.7 bits (12),  Expect = 80
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Plus
+
+Query  1       ACTGACTGACTG  12
+               ||||||||||||
+Sbjct  133671  ACTGACTGACTG  133682
+
+
+>NC_037667.1 Pandoravirus quercus, complete genome
+Length=2077288
+
+ Score = 23.7 bits (12),  Expect = 80
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Plus
+
+Query  1        ACTGACTGACTG  12
+                ||||||||||||
+Sbjct  1027379  ACTGACTGACTG  1027390
+
+
+>NC_053512.1 Mycobacterium phage Kumao, complete genome
+Length=70373
+
+ Score = 23.7 bits (12),  Expect = 80
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  1      ACTGACTGACTG  12
+              ||||||||||||
+Sbjct  40919  ACTGACTGACTG  40908
+
+
+>NC_048637.1 Bacteriophage vB_NpeS-2AV2, complete genome
+Length=139100
+
+ Score = 23.7 bits (12),  Expect = 80
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  1      ACTGACTGACTG  12
+              ||||||||||||
+Sbjct  21465  ACTGACTGACTG  21454
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.33    0.620     1.10 
+
+Effective search space used: 1103720618
+
+
+  Database: Refseq viruses representative genomes
+    Posted date:  Dec 4, 2024  11:17 AM
+  Number of letters in database: 552,047,339
+  Number of sequences in database:  18,703
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 2, Extension: 2

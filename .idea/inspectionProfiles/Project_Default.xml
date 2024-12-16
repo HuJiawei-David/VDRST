@@ -1,0 +1,70 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="HtmlUnknownAttribute" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="myValues">
+        <value>
+          <list size="13">
+            <item index="0" class="java.lang.String" itemvalue="color" />
+            <item index="1" class="java.lang.String" itemvalue="text-color" />
+            <item index="2" class="java.lang.String" itemvalue="@click" />
+            <item index="3" class="java.lang.String" itemvalue="v-show" />
+            <item index="4" class="java.lang.String" itemvalue="scoped" />
+            <item index="5" class="java.lang.String" itemvalue="v-for" />
+            <item index="6" class="java.lang.String" itemvalue="@click.native" />
+            <item index="7" class="java.lang.String" itemvalue="v-if" />
+            <item index="8" class="java.lang.String" itemvalue=":src" />
+            <item index="9" class="java.lang.String" itemvalue="v-model" />
+            <item index="10" class="java.lang.String" itemvalue="@submit.prevent" />
+            <item index="11" class="java.lang.String" itemvalue=":disabled" />
+            <item index="12" class="java.lang.String" itemvalue="@input" />
+          </list>
+        </value>
+      </option>
+      <option name="myCustomValuesEnabled" value="true" />
+    </inspection_tool>
+    <inspection_tool class="HtmlUnknownTag" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="myValues">
+        <value>
+          <list size="34">
+            <item index="0" class="java.lang.String" itemvalue="nobr" />
+            <item index="1" class="java.lang.String" itemvalue="noembed" />
+            <item index="2" class="java.lang.String" itemvalue="comment" />
+            <item index="3" class="java.lang.String" itemvalue="noscript" />
+            <item index="4" class="java.lang.String" itemvalue="embed" />
+            <item index="5" class="java.lang.String" itemvalue="script" />
+            <item index="6" class="java.lang.String" itemvalue="router-view" />
+            <item index="7" class="java.lang.String" itemvalue="el-container" />
+            <item index="8" class="java.lang.String" itemvalue="el-aside" />
+            <item index="9" class="java.lang.String" itemvalue="el-header" />
+            <item index="10" class="java.lang.String" itemvalue="el-main" />
+            <item index="11" class="java.lang.String" itemvalue="el-menu-item" />
+            <item index="12" class="java.lang.String" itemvalue="el-submenu" />
+            <item index="13" class="java.lang.String" itemvalue="el-menu" />
+            <item index="14" class="java.lang.String" itemvalue="el-submenu__title" />
+            <item index="15" class="java.lang.String" itemvalue="el-submenu--title" />
+            <item index="16" class="java.lang.String" itemvalue="el-breadcrumb" />
+            <item index="17" class="java.lang.String" itemvalue="el-breadcrumb-item" />
+            <item index="18" class="java.lang.String" itemvalue="el-drodown" />
+            <item index="19" class="java.lang.String" itemvalue="el-dropdown-menu" />
+            <item index="20" class="java.lang.String" itemvalue="el-dropdown-item" />
+            <item index="21" class="java.lang.String" itemvalue="el-dropdown" />
+            <item index="22" class="java.lang.String" itemvalue="el-card" />
+            <item index="23" class="java.lang.String" itemvalue="el-button" />
+            <item index="24" class="java.lang.String" itemvalue="el-table" />
+            <item index="25" class="java.lang.String" itemvalue="el-table-colum" />
+            <item index="26" class="java.lang.String" itemvalue="el-table-column" />
+            <item index="27" class="java.lang.String" itemvalue="el-form" />
+            <item index="28" class="java.lang.String" itemvalue="el-form-item" />
+            <item index="29" class="java.lang.String" itemvalue="el-input" />
+            <item index="30" class="java.lang.String" itemvalue="valid-code" />
+            <item index="31" class="java.lang.String" itemvalue="router-link" />
+            <item index="32" class="java.lang.String" itemvalue="el-upload" />
+            <item index="33" class="java.lang.String" itemvalue="el-dialog" />
+          </list>
+        </value>
+      </option>
+      <option name="myCustomValuesEnabled" value="true" />
+    </inspection_tool>
+  </profile>
+</component>

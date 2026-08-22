@@ -1,11 +1,9 @@
 package vdrst.bench;
 
 import vdrst.align.*;
-import vdrst.blast.BlastHit;
 import vdrst.blast.BlastRunner;
-import vdrst.blast.Hsp;
+import vdrst.index.*;
 
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -13,29 +11,34 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Measures the search pipeline stage by stage, so that a claimed speedup can be
- * attributed to a specific change rather than asserted as a single number.
+ * Measures the search pipeline stage by stage, so a claimed speedup can be attributed to
+ * a specific change instead of asserted as one number.
  *
  * <pre>
- *   B0  no prefilter, v1's Smith-Waterman over every genome in the database
- *   B1  BLAST prefilter, then v1's Smith-Waterman over the concatenated HSPs
- *   B2  BLAST prefilter, then affine-gap Gotoh per HSP
+ *   B0   no prefilter          v1's Smith-Waterman against every genome in the database
+ *   B1   blastn subprocess     + v1's Smith-Waterman   (v1's pipeline, as shipped)
+ *   B2   blastn subprocess     + affine-gap Gotoh
+ *   B3   in-process k-mer      + affine-gap Gotoh
+ *   B4   in-process k-mer      + banded Gotoh
+ *   B5   in-process k-mer      + vectorised Gotoh      (v2, as shipped)
  * </pre>
  *
- * <p>B0 is the honest baseline: it is what "search the database with Smith-Waterman"
- * costs when nothing narrows the candidate set first. It is the number the prefilter
- * has to beat, and it is the one v1 never wrote down.
+ * <p>B0 is the honest baseline: what "search the database with Smith-Waterman" costs when
+ * nothing narrows the candidate set first. It is the number the prefilter has to beat and
+ * the denominator v1 never wrote down. Each later stage changes exactly one thing from
+ * the stage above it, so the difference between two rows has a single cause.
  *
- * <p>Every stage returns a checksum that is accumulated and printed. Without it the JIT
- * is entitled to notice that nothing reads the alignment scores and delete the work
- * being timed.
+ * <p>Every stage accumulates a checksum that is consumed at the end. Without it the JIT is
+ * free to notice that nothing reads the scores and delete the work being timed.
  */
 public final class BenchmarkMain {
 
-    private static final int DEFAULT_WARMUP = 3;
-    private static final int DEFAULT_ITERATIONS = 20;
-    /** B0 costs tens of seconds per query; a handful of samples is all that is affordable. */
+    private static final int DEFAULT_WARMUP = 200;
+    private static final int DEFAULT_ITERATIONS = 2000;
+    /** B0 costs tens of seconds per query, so a handful of samples is all there is time for. */
     private static final int BASELINE_ITERATIONS = 3;
+
+    private static long checksum;
 
     public static void main(String[] args) throws Exception {
         Path corpusDir = Paths.get(argument(args, "--corpus", "bench/corpus"));
@@ -43,216 +46,179 @@ public final class BenchmarkMain {
         int warmup = Integer.parseInt(argument(args, "--warmup", String.valueOf(DEFAULT_WARMUP)));
         int iterations = Integer.parseInt(argument(args, "--iterations", String.valueOf(DEFAULT_ITERATIONS)));
         boolean skipBaseline = List.of(args).contains("--skip-baseline");
+        boolean skipBlast = List.of(args).contains("--skip-blast");
 
         List<String> queries = Files.readAllLines(corpusDir.resolve("queries.txt"));
         if (queries.isEmpty()) throw new IllegalStateException("no queries in " + corpusDir);
+        byte[][] encoded = new byte[queries.size()][];
+        for (int i = 0; i < queries.size(); i++) encoded[i] = Nucleotides.encode(queries.get(i));
 
         printEnvironment(database, queries);
 
-        Corpus corpus = null;
-        if (!skipBaseline) {
-            long started = System.nanoTime();
-            corpus = Corpus.load(corpusDir.resolve("viruses.fasta"));
-            System.out.printf("  corpus       %,d genomes, %,d bases, loaded in %.1f s%n",
-                    corpus.size(), corpus.totalBases(), (System.nanoTime() - started) / 1e9);
-        }
-        System.out.println();
+        long t0 = System.nanoTime();
+        GenomeStore store = GenomeStore.load(corpusDir.resolve("viruses.fasta"));
+        long t1 = System.nanoTime();
+        KmerIndex index = KmerIndex.build(store);
+        long t2 = System.nanoTime();
+
+        System.out.printf("  corpus       %,d genomes, %,d bases, read in %.2f s%n",
+                store.count(), store.totalBases(), (t1 - t0) / 1e9);
+        System.out.printf("  index        %,d positions, %,.0f MB, built in %.2f s%n%n",
+                index.indexedPositions(), index.approximateBytes() / 1048576.0, (t2 - t1) / 1e9);
 
         List<Samples> results = new ArrayList<>();
 
-        try (BlastRunner runner = new BlastRunner("blastn", database)) {
-            runner.verifyConfiguration();
+        if (!skipBaseline) {
+            results.add(measureBaseline(store, encoded));
+        }
 
-            if (corpus != null) {
-                results.add(measureBaseline(corpus, queries, warmup > 0 ? 1 : 0, BASELINE_ITERATIONS));
+        if (!skipBlast) {
+            try (Prefilter blast = new BlastPrefilter(new BlastRunner("blastn", database))) {
+                results.add(measure("B1  blastn + v1 Smith-Waterman", blast,
+                        new LegacySmithWaterman(ScoringScheme.legacyV1()), encoded, warmup / 20, iterations / 40));
+                results.add(measure("B2  blastn + Gotoh affine", blast,
+                        new GotohAligner(ScoringScheme.prefilter()), encoded, warmup / 20, iterations / 40));
             }
-            results.add(measurePipeline("B1  prefilter + v1 Smith-Waterman",
-                    runner, queries, warmup, iterations, Mode.LEGACY));
-            results.add(measurePipeline("B2  prefilter + Gotoh affine",
-                    runner, queries, warmup, iterations, Mode.GOTOH));
+        }
 
-            printLatencyBudget(runner, queries, warmup, iterations);
+        try (Prefilter kmer = new KmerPrefilter(index)) {
+            results.add(measure("B3  k-mer index + Gotoh affine", kmer,
+                    new GotohAligner(ScoringScheme.prefilter()), encoded, warmup, iterations));
+            results.add(measure("B4  k-mer index + Gotoh banded", kmer,
+                    new BandedGotohAligner(ScoringScheme.prefilter(), 64), encoded, warmup, iterations));
+            results.add(measure("B5  k-mer index + Gotoh SIMD", kmer,
+                    new VectorGotohAligner(ScoringScheme.prefilter()), encoded, warmup, iterations));
+
+            printLatencyBudget(kmer, new VectorGotohAligner(ScoringScheme.prefilter()), encoded, warmup, iterations);
         }
 
         System.out.println("\n  results");
-        System.out.println("  " + "-".repeat(96));
+        System.out.println("  " + "-".repeat(100));
         for (Samples s : results) System.out.println("  " + s.describe());
 
         if (results.size() > 1) {
             Samples baseline = results.get(0);
-            System.out.println("\n  speedup vs " + baseline.label().trim().split(" ")[0] + " (median)");
+            System.out.println("\n  speedup over " + baseline.label().trim() + " (median)");
             for (int i = 1; i < results.size(); i++) {
                 Samples s = results.get(i);
-                System.out.printf("    %-28s %.1fx%n",
+                System.out.printf("    %-34s %9.1fx%n",
                         s.label().trim(), baseline.medianMillis() / s.medianMillis());
             }
         }
+
+        if (checksum == Long.MIN_VALUE) System.out.println("unreachable " + checksum);
         System.out.println();
     }
 
-    private enum Mode { LEGACY, GOTOH }
-
-    /**
-     * B0: what v1's algorithm costs with no prefilter at all — the query aligned against
-     * every genome in the database.
-     */
-    private static Samples measureBaseline(Corpus corpus, List<String> queries, int warmup, int iterations) {
+    /** B0: v1's algorithm with no prefilter — the query against every genome. */
+    private static Samples measureBaseline(GenomeStore store, byte[][] queries) {
         System.out.println("  B0  no prefilter, v1 Smith-Waterman over the whole database");
-        System.out.printf("      %,d genomes x %,d bases per query — this is the slow one%n",
-                corpus.size(), corpus.totalBases());
+        System.out.printf("      %,d genomes, %,d bases per query — this is the one that takes seconds%n",
+                store.count(), store.totalBases());
 
         Aligner aligner = new LegacySmithWaterman(ScoringScheme.legacyV1());
-        long checksum = 0;
+        long[] samples = new long[BASELINE_ITERATIONS];
 
-        for (int i = 0; i < warmup; i++) {
-            checksum += scanEverything(aligner, corpus, queries.get(i % queries.size()));
-            System.out.println("      warmup " + (i + 1) + "/" + warmup + " complete");
-        }
-
-        long[] samples = new long[iterations];
-        for (int i = 0; i < iterations; i++) {
-            byte[] query = Nucleotides.encode(queries.get(i % queries.size()));
+        for (int i = 0; i < BASELINE_ITERATIONS; i++) {
+            byte[] query = queries[i % queries.length];
             long started = System.nanoTime();
-            checksum += scanEverythingEncoded(aligner, corpus, query);
+            checksum += scanEverything(aligner, store, query);
             samples[i] = System.nanoTime() - started;
-            System.out.printf("      sample %d/%d  %.1f s%n", i + 1, iterations, samples[i] / 1e9);
+            System.out.printf("      sample %d/%d   %.2f s%n", i + 1, BASELINE_ITERATIONS, samples[i] / 1e9);
         }
-
-        consume(checksum);
         return Samples.of("B0  no prefilter (v1 SW)", samples);
     }
 
-    private static long scanEverything(Aligner aligner, Corpus corpus, String query) {
-        return scanEverythingEncoded(aligner, corpus, Nucleotides.encode(query));
-    }
-
-    private static long scanEverythingEncoded(Aligner aligner, Corpus corpus, byte[] query) {
+    private static long scanEverything(Aligner aligner, GenomeStore store, byte[] query) {
         long best = 0;
-        for (Corpus.Genome genome : corpus.genomes()) {
-            best = Math.max(best, aligner.score(query, genome.bases()));
+        byte[] bases = store.bases();
+        for (int g = 0; g < store.count(); g++) {
+            byte[] genome = java.util.Arrays.copyOfRange(bases, store.start(g), store.start(g + 1));
+            best = Math.max(best, aligner.score(query, genome));
         }
         return best;
     }
 
-    /** B1 and B2: prefilter, then re-rank the candidates it returned. */
-    private static Samples measurePipeline(String label, BlastRunner runner, List<String> queries,
-                                           int warmup, int iterations, Mode mode) {
-        Aligner aligner = mode == Mode.LEGACY
-                ? new LegacySmithWaterman(ScoringScheme.legacyV1())
-                : new GotohAligner(ScoringScheme.prefilter());
+    private static Samples measure(String label, Prefilter prefilter, Aligner aligner,
+                                   byte[][] queries, int warmup, int iterations) {
+        warmup = Math.max(1, warmup);
+        iterations = Math.max(3, iterations);
 
-        long checksum = 0;
-        for (int i = 0; i < warmup; i++) {
-            checksum += runPipeline(runner, aligner, queries.get(i % queries.size()), mode);
-        }
+        for (int i = 0; i < warmup; i++) checksum += pipeline(prefilter, aligner, queries[i % queries.length]);
 
         long[] samples = new long[iterations];
         for (int i = 0; i < iterations; i++) {
-            String query = queries.get(i % queries.size());
+            byte[] query = queries[i % queries.length];
             long started = System.nanoTime();
-            checksum += runPipeline(runner, aligner, query, mode);
+            checksum += pipeline(prefilter, aligner, query);
             samples[i] = System.nanoTime() - started;
         }
 
-        consume(checksum);
-        System.out.println("  " + label + "  done (" + iterations + " samples)");
+        System.out.println("  " + label + "   done (" + iterations + " samples)");
         return Samples.of(label, samples);
     }
 
-    private static long runPipeline(BlastRunner runner, Aligner aligner, String query, Mode mode) {
+    private static long pipeline(Prefilter prefilter, Aligner aligner, byte[] query) {
         long best = 0;
-        for (BlastHit hit : runner.search(query)) {
-            if (mode == Mode.LEGACY) {
-                // v1 concatenated every HSP fragment and aligned the concatenations.
-                StringBuilder q = new StringBuilder(), s = new StringBuilder();
-                for (Hsp hsp : hit.hsps()) {
-                    q.append(hsp.queryAligned().replace("-", ""));
-                    s.append(hsp.subjectAligned().replace("-", ""));
-                }
-                if (q.length() > 0 && s.length() > 0) {
-                    best = Math.max(best, aligner.score(
-                            Nucleotides.encode(q.toString()), Nucleotides.encode(s.toString())));
-                }
-            } else {
-                for (Hsp hsp : hit.hsps()) {
-                    best = Math.max(best, aligner.score(
-                            Nucleotides.encode(hsp.queryUngapped()),
-                            Nucleotides.encode(hsp.subjectUngapped())));
-                }
-            }
+        for (Candidate candidate : prefilter.candidates(query, 20)) {
+            best = Math.max(best, aligner.score(query, candidate.subjectBases()));
         }
         return best;
     }
 
     /**
-     * Splits the prefiltered pipeline into the subprocess and the alignment, because
-     * knowing which half dominates decides what is worth optimising next. Optimising the
-     * half that is already cheap is the most common way to spend a week on nothing.
+     * Splits the pipeline into prefilter and alignment. Which half dominates decides what
+     * is worth optimising next; getting this backwards is the most reliable way to spend a
+     * week and move nothing.
      */
-    private static void printLatencyBudget(BlastRunner runner, List<String> queries,
-                                           int warmup, int iterations) {
-        Aligner aligner = new GotohAligner(ScoringScheme.prefilter());
-        long checksum = 0;
+    private static void printLatencyBudget(Prefilter prefilter, Aligner aligner,
+                                           byte[][] queries, int warmup, int iterations) {
+        for (int i = 0; i < warmup; i++) checksum += pipeline(prefilter, aligner, queries[i % queries.length]);
 
-        for (int i = 0; i < warmup; i++) checksum += runPipeline(runner, aligner, queries.get(i % queries.size()), Mode.GOTOH);
-
-        long[] blastNanos = new long[iterations];
+        long[] prefilterNanos = new long[iterations];
         long[] alignNanos = new long[iterations];
 
         for (int i = 0; i < iterations; i++) {
-            String query = queries.get(i % queries.size());
+            byte[] query = queries[i % queries.length];
 
             long t0 = System.nanoTime();
-            List<BlastHit> hits = runner.search(query);
+            List<Candidate> candidates = prefilter.candidates(query, 20);
             long t1 = System.nanoTime();
 
             long best = 0;
-            for (BlastHit hit : hits) {
-                for (Hsp hsp : hit.hsps()) {
-                    best = Math.max(best, aligner.score(
-                            Nucleotides.encode(hsp.queryUngapped()),
-                            Nucleotides.encode(hsp.subjectUngapped())));
-                }
-            }
+            for (Candidate candidate : candidates) best = Math.max(best, aligner.score(query, candidate.subjectBases()));
             long t2 = System.nanoTime();
 
-            blastNanos[i] = t1 - t0;
+            prefilterNanos[i] = t1 - t0;
             alignNanos[i] = t2 - t1;
             checksum += best;
         }
 
-        consume(checksum);
+        Samples pre = Samples.of("prefilter", prefilterNanos);
+        Samples align = Samples.of("alignment", alignNanos);
+        double total = pre.medianMillis() + align.medianMillis();
 
-        Samples blast = Samples.of("  blast subprocess", blastNanos);
-        Samples align = Samples.of("  smith-waterman re-rank", alignNanos);
-        double total = blast.medianMillis() + align.medianMillis();
-
-        System.out.println("\n  latency budget (median of " + iterations + ")");
-        System.out.println("  " + "-".repeat(96));
-        System.out.printf("    blast subprocess        %8.2f ms   %5.1f%%%n",
-                blast.medianMillis(), 100 * blast.medianMillis() / total);
-        System.out.printf("    smith-waterman re-rank  %8.2f ms   %5.1f%%%n",
-                align.medianMillis(), 100 * align.medianMillis() / total);
+        System.out.println("\n  latency budget, v2 as shipped (median of " + iterations + ")");
+        System.out.println("  " + "-".repeat(100));
+        System.out.printf("    k-mer prefilter          %8.3f ms   %5.1f%%%n",
+                pre.medianMillis(), 100 * pre.medianMillis() / total);
+        System.out.printf("    alignment (%d candidates) %8.3f ms   %5.1f%%%n",
+                20, align.medianMillis(), 100 * align.medianMillis() / total);
     }
 
     private static void printEnvironment(String database, List<String> queries) {
         Runtime runtime = Runtime.getRuntime();
         System.out.println("\n  VDRST benchmark");
-        System.out.println("  " + "=".repeat(96));
+        System.out.println("  " + "=".repeat(100));
         System.out.printf("  jvm          %s %s%n",
                 System.getProperty("java.vm.name"), System.getProperty("java.version"));
-        System.out.printf("  os           %s %s (%s)%n",
-                System.getProperty("os.name"), System.getProperty("os.version"),
-                System.getProperty("os.arch"));
+        System.out.printf("  os           %s (%s)%n",
+                System.getProperty("os.name"), System.getProperty("os.arch"));
         System.out.printf("  cpus         %d available to the JVM%n", runtime.availableProcessors());
         System.out.printf("  heap         %,d MB max%n", runtime.maxMemory() / (1024 * 1024));
+        System.out.printf("  vectors      %s%n", VectorGotohAligner.speciesDescription());
         System.out.printf("  database     %s%n", database);
         System.out.printf("  queries      %d, %d bases each%n", queries.size(), queries.get(0).length());
-    }
-
-    /** Keeps the JIT from deleting work whose result nothing observes. */
-    private static void consume(long checksum) {
-        if (checksum == Long.MIN_VALUE) System.out.println("unreachable " + checksum);
     }
 
     private static String argument(String[] args, String flag, String fallback) {

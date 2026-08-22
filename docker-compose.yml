@@ -1,0 +1,23 @@
+# One service. v1 needed MySQL alongside it, for tables the search path never read.
+#
+#   make corpus            generate the seeded database (once)
+#   docker compose up      http://localhost:9090
+#
+# To run against real data instead, point the volume at a directory holding a FASTA of
+# NCBI's ref_viruses_rep_genomes. No BLAST installation is required either way — the
+# prefilter is in-process.
+
+services:
+  vdrst:
+    build: .
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./bench/corpus:/data:ro
+    environment:
+      VDRST_PORT: 9090
+    # The index is held in memory: roughly 4 bytes per base, plus 16 MB of bucket table.
+    deploy:
+      resources:
+        limits:
+          memory: 3g

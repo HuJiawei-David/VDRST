@@ -1,0 +1,40 @@
+name: build
+
+# The whole suite runs against a real index over real sequence data and a real blastn,
+# on a corpus generated from a fixed seed. Nothing here is mocked, and nothing is
+# downloaded from a package repository, because there is nothing to download.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Install BLAST+
+        # Only the tests need it: KmerPrefilterTest checks the in-process index against
+        # blastn on real data, which is a stronger claim than checking it against
+        # expectations this repository wrote itself.
+        run: sudo apt-get update -q && sudo apt-get install -y -q ncbi-blast+
+
+      - name: Generate the seeded corpus
+        run: make corpus ARGS="--scale CI --out bench/corpus-ci"
+
+      - name: Test
+        run: make test
+
+      - name: Benchmark (smoke)
+        # Not a performance gate — CI runners are too noisy for that. It only proves the
+        # benchmark still runs, so the numbers in README.md stay reproducible.
+        run: make bench ARGS="--corpus bench/corpus-ci --skip-baseline --skip-blast --iterations 200 --warmup 50"

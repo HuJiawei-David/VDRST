@@ -192,9 +192,24 @@ The default corpus is synthetic and seeded, so the numbers above reproduce from 
 clone in minutes. To run against NCBI's real viral genomes instead:
 
 ```bash
-update_blastdb.pl --decompress ref_viruses_rep_genomes    # needs BLAST+
-make bench ARGS="--db /path/to/ref_viruses_rep_genomes.fasta"
+# If you do not have it yet (this part needs BLAST+):
+update_blastdb.pl --decompress ref_viruses_rep_genomes
+
+# A BLAST database is a set of binary index files. v2 has no BLAST dependency and reads
+# sequences directly, so export it to FASTA once:
+blastdbcmd -db ref_viruses_rep_genomes -entry all -out ref_viruses.fasta
+
+make run   ARGS="--db /path/to/ref_viruses.fasta"
+make bench ARGS="--db /path/to/ref_viruses.fasta"
 ```
+
+After that one export, nothing in VDRST needs BLAST installed.
+
+**Memory.** The index holds the sequences plus about 4 bytes per indexed position:
+roughly `5 x bases + 16 MB`. For a few hundred megabases that is a few gigabytes, so give
+the JVM a heap to match (`-Xmx6g`) or halve the index with `--stride 2`, which indexes
+every second position and costs a little sensitivity. Startup prints the estimate before
+allocating anything.
 
 Both prefilters are behind one interface, so `blastn` remains available as a cross-check —
 `KmerPrefilterTest` asserts the in-process index agrees with it on the top candidate for

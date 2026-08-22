@@ -41,14 +41,30 @@ public final class Main {
         Path database = Paths.get(argument(args, "--db", "bench/corpus/viruses.fasta"));
         int port = Integer.parseInt(argument(args, "--port", System.getenv().getOrDefault(
                 "VDRST_PORT", String.valueOf(DEFAULT_PORT))));
+        int k = Integer.parseInt(argument(args, "--k", String.valueOf(KmerIndex.DEFAULT_K)));
+        int stride = Integer.parseInt(argument(args, "--stride", "1"));
+
+        requireFasta(database);
 
         System.out.println("VDRST — loading " + database);
         long started = System.nanoTime();
         GenomeStore store = GenomeStore.load(database);
-        KmerIndex index = KmerIndex.build(store);
-        System.out.printf("  %,d genomes, %,d bases, index %,.0f MB, ready in %.1f s%n",
-                store.count(), store.totalBases(), index.approximateBytes() / 1048576.0,
-                (System.nanoTime() - started) / 1e9);
+
+        // Roughly 1 byte per base for the sequences, 4 per indexed position, plus the
+        // bucket table. Said out loud before it is allocated, because the alternative is
+        // an OutOfMemoryError three minutes into startup with no explanation.
+        long estimate = store.totalBases() + (4L * store.totalBases() / stride)
+                + (4L << (2 * k));
+        System.out.printf("  %,d genomes, %,d bases — index needs about %,d MB (k=%d, stride=%d)%n",
+                store.count(), store.totalBases(), estimate / 1048576, k, stride);
+        if (estimate > Runtime.getRuntime().maxMemory()) {
+            System.out.printf("  heap is %,d MB. Raise it with -Xmx, or halve the index with --stride 2.%n",
+                    Runtime.getRuntime().maxMemory() / 1048576);
+        }
+
+        KmerIndex index = KmerIndex.build(store, k, stride);
+        System.out.printf("  ready in %.1f s, index %,.0f MB%n",
+                (System.nanoTime() - started) / 1e9, index.approximateBytes() / 1048576.0);
         System.out.println("  vectors: " + VectorGotohAligner.speciesDescription());
 
         Prefilter prefilter = new KmerPrefilter(index);
@@ -143,6 +159,33 @@ public final class Main {
     private static String argument(String[] args, String flag, String fallback) {
         for (int i = 0; i < args.length - 1; i++) if (args[i].equals(flag)) return args[i + 1];
         return fallback;
+    }
+
+    /**
+     * v2 reads FASTA. A BLAST database is a set of binary index files, and pointing at one
+     * is the single most likely way to get this wrong — the path looks right, and the
+     * files are right there next to it. So say what to run instead of failing with
+     * NoSuchFileException.
+     */
+    private static void requireFasta(Path database) {
+        if (java.nio.file.Files.exists(database)) return;
+
+        boolean looksLikeBlastDb = java.nio.file.Files.exists(Paths.get(database + ".nin"))
+                || java.nio.file.Files.exists(Paths.get(database + ".nsq"));
+
+        if (looksLikeBlastDb) {
+            throw new IllegalArgumentException("""
+                %s is a BLAST database, not a FASTA file.
+
+                v2 has no BLAST dependency, so it reads sequences directly. Export once:
+
+                    blastdbcmd -db %s -entry all -out %s.fasta
+
+                then start with --db %s.fasta
+                """.formatted(database, database, database, database));
+        }
+        throw new IllegalArgumentException("no such file: " + database
+                + "\n\nGenerate the sample database with:  make corpus");
     }
 
     /**

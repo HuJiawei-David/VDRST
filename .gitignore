@@ -1,0 +1,43 @@
+# Build output
+target/
+build/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+
+# Dependencies
+node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.settings/
+.project
+.classpath
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime artifacts — these are produced by a search, never committed.
+# v1 committed query.fasta and result.txt; see RETROSPECTIVE.md finding 2.
+query.fasta
+result.txt
+*.blast.out
+
+# Benchmark output
+bench/results/
+*.jfr
+jmh-result.*
+
+# Generated corpora (regenerate with `make corpus`, seed is fixed)
+bench/corpus/
+
+# Local configuration and secrets — never commit credentials.
+# v1 committed a live MySQL password; see RETROSPECTIVE.md finding 1.
+.env
+*.local.yml
+application-local.yml

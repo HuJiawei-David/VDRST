@@ -10,10 +10,12 @@ VECTOR       := --add-modules jdk.incubator.vector
 JAVAC_FLAGS  := --release $(JAVA_VERSION) -Xlint:all -encoding UTF-8
 
 TESTS := vdrst.align.AlignerEquivalenceTest \
+         vdrst.align.BandedAlignerTest \
          vdrst.align.NucleotidesTest \
          vdrst.align.ScoringSchemeTest \
          vdrst.blast.BlastOutputParserTest \
          vdrst.blast.BlastRunnerTest \
+         vdrst.index.KmerPrefilterTest \
          vdrst.service.SearchServiceTest \
          vdrst.service.ConcurrentSearchTest
 

@@ -21,9 +21,20 @@ public final class AlignerEquivalenceTest {
     private static final int TRIALS = 400;
     private static final long SEED = 0x5EED_1234L;
 
-    /** Aligners under test, keyed by the scoring scheme they are built with. */
+    /**
+     * Every affine-gap implementation in the main source tree. Adding one here is what
+     * makes it trustworthy: the optimised versions must produce the identical integer the
+     * naive reference does, not merely a similar one.
+     *
+     * <p>The banded aligner appears with a band wide enough to cover any input these
+     * tests generate, because inside its band it is exact. Where the band bites is a
+     * separate question, pinned by BandedAlignerTest.
+     */
     private static List<Function<ScoringScheme, Aligner>> affineAligners() {
-        return List.of(GotohAligner::new);
+        return List.of(
+                GotohAligner::new,
+                VectorGotohAligner::new,
+                scoring -> new BandedGotohAligner(scoring, 10_000));
     }
 
     @Test("Gotoh agrees with the reference implementation on random sequences")
@@ -56,22 +67,24 @@ public final class AlignerEquivalenceTest {
 
         for (ScoringScheme scoring : schemes) {
             ReferenceGotoh oracle = new ReferenceGotoh(scoring);
-            GotohAligner aligner = new GotohAligner(scoring);
-            for (int trial = 0; trial < 120; trial++) {
-                byte[] q = randomSequence(rng, 1 + rng.nextInt(80));
-                byte[] s = randomSequence(rng, 1 + rng.nextInt(80));
-                Assert.equal(oracle.score(q, s), aligner.score(q, s),
-                        "disagreement under " + scoring
-                                + "\n  query   = " + Nucleotides.decode(q)
-                                + "\n  subject = " + Nucleotides.decode(s));
+            for (Function<ScoringScheme, Aligner> factory : affineAligners()) {
+                Aligner aligner = factory.apply(scoring);
+                for (int trial = 0; trial < 120; trial++) {
+                    byte[] q = randomSequence(rng, 1 + rng.nextInt(80));
+                    byte[] s = randomSequence(rng, 1 + rng.nextInt(80));
+                    Assert.equal(oracle.score(q, s), aligner.score(q, s),
+                            aligner.id() + " disagreed under " + scoring
+                                    + "\n  query   = " + Nucleotides.decode(q)
+                                    + "\n  subject = " + Nucleotides.decode(s));
+                }
             }
         }
     }
 
-    @Test("Gotoh is symmetric: swapping query and subject does not change the score")
+    @Test("alignment is symmetric: swapping query and subject does not change the score")
     public void gotohIsSymmetric() {
         SplittableRandom rng = new SplittableRandom(SEED + 2);
-        GotohAligner aligner = new GotohAligner();
+        Aligner aligner = new GotohAligner();
         for (int trial = 0; trial < 200; trial++) {
             byte[] q = randomSequence(rng, 1 + rng.nextInt(90));
             byte[] s = randomSequence(rng, 1 + rng.nextInt(90));

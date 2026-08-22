@@ -53,7 +53,7 @@ public final class CorpusGenerator {
 
     private static final char[] BASES = {'A', 'C', 'G', 'T'};
 
-    public static void main(String[] args) throws IOException, InterruptedException {
+    public static void main(String[] args) throws IOException {
         Scale scale = Scale.DEFAULT;
         Path outputDir = Paths.get("bench/corpus");
 
@@ -121,21 +121,79 @@ public final class CorpusGenerator {
         return new String(chars);
     }
 
-    private static void makeBlastDb(Path fasta) throws IOException, InterruptedException {
-        System.out.println("running makeblastdb...");
-        Process process = new ProcessBuilder(
-                "makeblastdb", "-in", fasta.toString(), "-dbtype", "nucl",
-                "-title", "vdrst_synthetic", "-parse_seqids")
-                .redirectErrorStream(true).start();
+    /**
+     * Builds a blastn database beside the FASTA, if BLAST+ is installed and willing.
+     *
+     * <p>Deliberately non-fatal. VDRST reads the FASTA directly and has no BLAST
+     * dependency at all; this database exists only so the benchmark can measure the old
+     * subprocess prefilter and the tests can check the in-process index against blastn.
+     * A machine without BLAST+ should still get a working corpus, and aborting here
+     * would make an optional cross-check look like a hard requirement.
+     *
+     * <p>Two things make this more careful than a single exec. makeblastdb is run with its
+     * working directory set to the corpus folder and given a bare filename, because on
+     * macOS a path containing a space — {@code ~/Desktop/cs project/...} is an ordinary
+     * one — produces "BLAST Database error: Database memory map file error", which names
+     * neither the path nor the space. And {@code -parse_seqids} is dropped on a retry,
+     * since it is the flag most likely to object for other reasons.
+     */
+    private static void makeBlastDb(Path fasta) {
+        System.out.println("building the optional blastn database...");
 
-        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        if (!process.waitFor(10, java.util.concurrent.TimeUnit.MINUTES)) {
-            process.destroyForcibly();
-            throw new IOException("makeblastdb did not finish within 10 minutes");
+        String failure = runMakeBlastDb(fasta, true);
+        if (failure != null) {
+            System.out.println("  retrying without -parse_seqids");
+            failure = runMakeBlastDb(fasta, false);
         }
-        if (process.exitValue() != 0) {
-            throw new IOException("makeblastdb failed:\n" + output);
+
+        if (failure == null) {
+            System.out.println("  blastn database ready");
+            return;
         }
-        System.out.println("database ready at " + fasta);
+
+        System.out.println();
+        System.out.println("  NOTE: could not build the blastn database. This is not fatal.");
+        System.out.println("        VDRST reads " + fasta.getFileName() + " directly and never uses BLAST.");
+        System.out.println("        Skipped: the B1/B2 benchmark rows and the tests that cross-check");
+        System.out.println("        the in-process index against blastn. Everything else works.");
+        System.out.println();
+        System.out.println("        makeblastdb said: " + failure);
+        System.out.println();
+    }
+
+    /** @return null on success, or a one-line description of what went wrong */
+    private static String runMakeBlastDb(Path fasta, boolean parseSeqIds) {
+        Path directory = fasta.toAbsolutePath().getParent();
+        String filename = fasta.getFileName().toString();
+
+        List<String> command = new ArrayList<>(List.of(
+                "makeblastdb", "-in", filename, "-dbtype", "nucl", "-title", "vdrst_synthetic"));
+        if (parseSeqIds) command.add("-parse_seqids");
+
+        try {
+            Process process = new ProcessBuilder(command)
+                    .directory(directory.toFile())
+                    .redirectErrorStream(true).start();
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+            if (!process.waitFor(10, java.util.concurrent.TimeUnit.MINUTES)) {
+                process.destroyForcibly();
+                return "did not finish within 10 minutes";
+            }
+            if (process.exitValue() != 0) {
+                for (String line : output.split("\n")) {
+                    if (line.contains("error") || line.contains("Error") || line.contains("ERROR")) {
+                        return line.trim();
+                    }
+                }
+                return "exited " + process.exitValue();
+            }
+            return null;
+        } catch (IOException e) {
+            return "BLAST+ is not installed (" + e.getMessage() + ")";
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "interrupted";
+        }
     }
 }

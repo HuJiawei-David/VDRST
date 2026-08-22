@@ -4,6 +4,7 @@ import vdrst.index.BlastPrefilter;
 import vdrst.index.GenomeStore;
 import vdrst.index.KmerIndex;
 import vdrst.index.KmerPrefilter;
+import vdrst.harness.Assert;
 import vdrst.index.Prefilter;
 
 import java.io.IOException;
@@ -33,15 +34,35 @@ public final class TestCorpus {
 
     private TestCorpus() {}
 
+    /** The FASTA every test needs. Its absence is a real failure — `make test` builds it. */
+    public static Path fasta() {
+        if (!Files.exists(DATABASE)) {
+            throw new IllegalStateException("the CI corpus is missing at " + DATABASE
+                    + " — run: make corpus ARGS=\"--scale CI --out bench/corpus-ci\"");
+        }
+        return DATABASE;
+    }
+
+    /**
+     * The blastn database, which is optional.
+     *
+     * <p>Nothing in VDRST needs BLAST; it is here so the in-process index can be checked
+     * against it. On a machine without BLAST+ — or where makeblastdb declined to run —
+     * the tests that use it are skipped rather than failed.
+     */
     public static String database() {
-        if (!Files.exists(Paths.get(DATABASE + ".nin"))) {
-            throw new IllegalStateException(
-                    "the CI corpus is missing — run: make corpus ARGS=\"--scale CI --out bench/corpus-ci\"");
+        fasta();
+        if (!Files.exists(Paths.get(DATABASE + ".nin")) && !Files.exists(Paths.get(DATABASE + ".nsq"))) {
+            Assert.skip("no blastn database beside " + DATABASE);
         }
         return DATABASE.toString();
     }
 
     public static List<String> queries() {
+        if (!Files.exists(QUERIES)) {
+            throw new IllegalStateException("the CI corpus is missing at " + QUERIES
+                    + " — run: make corpus ARGS=\"--scale CI --out bench/corpus-ci\"");
+        }
         try {
             return Files.readAllLines(QUERIES);
         } catch (IOException e) {
@@ -57,7 +78,7 @@ public final class TestCorpus {
                 local = sharedIndex;
                 if (local == null) {
                     try {
-                        local = KmerIndex.build(GenomeStore.load(DATABASE));
+                        local = KmerIndex.build(GenomeStore.load(fasta()));
                     } catch (IOException e) {
                         throw new IllegalStateException("could not load " + DATABASE, e);
                     }

@@ -16,6 +16,7 @@ public final class TestRunner {
 
     public static void main(String[] args) throws Exception {
         List<Failure> failures = new ArrayList<>();
+        List<String> skipped = new ArrayList<>();
         int passed = 0, total = 0;
         long started = System.nanoTime();
 
@@ -38,8 +39,14 @@ public final class TestRunner {
                     System.out.println("    ok   " + label);
                 } catch (InvocationTargetException e) {
                     Throwable cause = e.getCause();
-                    System.out.println("    FAIL " + label);
-                    failures.add(new Failure(shortName + "." + method.getName(), cause.getMessage(), cause));
+                    if (cause instanceof Assert.TestSkipped) {
+                        total--;
+                        System.out.println("    skip " + label + "  (" + cause.getMessage() + ")");
+                        skipped.add(shortName + "." + method.getName());
+                    } else {
+                        System.out.println("    FAIL " + label);
+                        failures.add(new Failure(shortName + "." + method.getName(), cause.getMessage(), cause));
+                    }
                 }
             }
         }
@@ -62,7 +69,13 @@ public final class TestRunner {
             System.out.println();
         }
 
-        System.out.printf("  %d/%d passed in %d ms%n%n", passed, total, millis);
+        System.out.printf("  %d/%d passed in %d ms%s%n%n", passed, total, millis,
+                skipped.isEmpty() ? "" : " (" + skipped.size() + " skipped)");
+        if (!skipped.isEmpty()) {
+            System.out.println("  skipped because an optional tool is not installed:");
+            for (String s : skipped) System.out.println("    " + s);
+            System.out.println("  install BLAST+ to run them — nothing else in this project needs it\n");
+        }
         if (!failures.isEmpty()) System.exit(1);
     }
 }

@@ -6,7 +6,27 @@ import java.util.Arrays;
 public final class Assert {
 
     public static final class AssertionFailure extends RuntimeException {
+        private static final long serialVersionUID = 1L;
         AssertionFailure(String message) { super(message); }
+    }
+
+    /**
+     * Thrown when a test cannot run because something optional is not installed.
+     *
+     * <p>A test that needs BLAST+ is not failing when BLAST+ is absent — it is not
+     * running, and reporting that as a failure trains people to ignore red output. The
+     * distinction matters here because the whole project deliberately has no required
+     * dependencies: everything BLAST-related is a cross-check, and a machine without it
+     * should still get a clean, honest test run.
+     */
+    public static final class TestSkipped extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+        public TestSkipped(String reason) { super(reason); }
+    }
+
+    /** Abandons the current test, reporting it as skipped rather than failed. */
+    public static void skip(String reason) {
+        throw new TestSkipped(reason);
     }
 
     private Assert() {}

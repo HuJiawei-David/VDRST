@@ -1,6 +1,6 @@
 package vdrst.service;
 
-import vdrst.blast.BlastRunner;
+import vdrst.index.Prefilter;
 import vdrst.blast.TestCorpus;
 import vdrst.harness.Assert;
 import vdrst.harness.Test;
@@ -70,7 +70,7 @@ public final class ConcurrentSearchTest {
         List<String> queries = TestCorpus.queries();
         Assert.isTrue(queries.size() >= SEARCHES, "the corpus should provide at least " + SEARCHES + " queries");
 
-        try (BlastRunner runner = TestCorpus.runner();
+        try (Prefilter runner = TestCorpus.prefilter();
              ExecutorService pool = Executors.newFixedThreadPool(THREADS)) {
 
             SearchService service = new SearchService(runner);
@@ -110,7 +110,7 @@ public final class ConcurrentSearchTest {
     public void invalidInputIsIsolated() throws Exception {
         List<String> queries = TestCorpus.queries();
 
-        try (BlastRunner runner = TestCorpus.runner();
+        try (Prefilter runner = TestCorpus.prefilter();
              ExecutorService pool = Executors.newFixedThreadPool(8)) {
 
             SearchService service = new SearchService(runner);

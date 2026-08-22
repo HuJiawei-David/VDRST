@@ -2,8 +2,8 @@ package vdrst.service;
 
 import vdrst.align.GotohAligner;
 import vdrst.align.ScoringScheme;
-import vdrst.blast.BlastRunner;
 import vdrst.blast.TestCorpus;
+import vdrst.index.Prefilter;
 import vdrst.harness.Assert;
 import vdrst.harness.Test;
 
@@ -13,7 +13,7 @@ public final class SearchServiceTest {
 
     @Test("a planted query finds the genome it was taken from")
     public void plantedQueryFindsItsSource() {
-        try (BlastRunner runner = TestCorpus.runner()) {
+        try (Prefilter runner = TestCorpus.prefilter()) {
             SearchService service = new SearchService(runner);
             List<String> queries = TestCorpus.queries();
 
@@ -28,7 +28,7 @@ public final class SearchServiceTest {
 
     @Test("results come back in descending score order")
     public void resultsAreSorted() {
-        try (BlastRunner runner = TestCorpus.runner()) {
+        try (Prefilter runner = TestCorpus.prefilter()) {
             SearchService service = new SearchService(runner);
             List<Match> matches = service.search(TestCorpus.queries().get(0));
 
@@ -41,9 +41,9 @@ public final class SearchServiceTest {
 
     @Test("the result limit is respected")
     public void resultLimitRespected() {
-        try (BlastRunner runner = TestCorpus.runner()) {
+        try (Prefilter runner = TestCorpus.prefilter()) {
             SearchService service = new SearchService(
-                    runner, new GotohAligner(ScoringScheme.prefilter()), 2);
+                    runner, new GotohAligner(ScoringScheme.prefilter()), 2, 20);
             Assert.isTrue(service.search(TestCorpus.queries().get(0)).size() <= 2,
                     "more results came back than the configured limit");
         }
@@ -51,7 +51,7 @@ public final class SearchServiceTest {
 
     @Test("the normalised score is a fraction in [0,1], unlike v1's percentage")
     public void normalisedScoreIsBounded() {
-        try (BlastRunner runner = TestCorpus.runner()) {
+        try (Prefilter runner = TestCorpus.prefilter()) {
             SearchService service = new SearchService(runner);
             for (Match match : service.search(TestCorpus.queries().get(0))) {
                 Assert.isTrue(match.normalizedScore() >= 0.0 && match.normalizedScore() <= 1.0,
@@ -63,7 +63,7 @@ public final class SearchServiceTest {
 
     @Test("a query planted with 5% mutations scores well above chance")
     public void mutatedQueryScoresHighly() {
-        try (BlastRunner runner = TestCorpus.runner()) {
+        try (Prefilter runner = TestCorpus.prefilter()) {
             SearchService service = new SearchService(runner);
             Match top = service.search(TestCorpus.queries().get(0)).get(0);
             Assert.isTrue(top.normalizedScore() > 0.6,
@@ -73,7 +73,7 @@ public final class SearchServiceTest {
 
     @Test("invalid sequences are rejected before any subprocess starts")
     public void invalidSequencesRejected() {
-        try (BlastRunner runner = TestCorpus.runner()) {
+        try (Prefilter runner = TestCorpus.prefilter()) {
             SearchService service = new SearchService(runner);
 
             Assert.throwsException(SequenceValidator.InvalidRequestException.class,
@@ -87,7 +87,7 @@ public final class SearchServiceTest {
 
     @Test("FASTA headers in the submitted text are stripped, not rejected")
     public void fastaHeaderAccepted() {
-        try (BlastRunner runner = TestCorpus.runner()) {
+        try (Prefilter runner = TestCorpus.prefilter()) {
             SearchService service = new SearchService(runner);
             String query = TestCorpus.queries().get(0);
             List<Match> withHeader = service.search(">my sample\n" + query + "\n");

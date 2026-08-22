@@ -1,43 +1,57 @@
 package vdrst.service;
 
 import vdrst.align.Aligner;
-import vdrst.align.GotohAligner;
 import vdrst.align.Nucleotides;
-import vdrst.align.ScoringScheme;
-import vdrst.blast.BlastHit;
-import vdrst.blast.BlastRunner;
-import vdrst.blast.Hsp;
+import vdrst.align.GotohAligner;
+import vdrst.index.Candidate;
+import vdrst.index.Prefilter;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
 /**
- * The two-stage search: a BLAST prefilter narrows the database to a handful of
- * candidates, then every candidate is re-scored with an exact Smith-Waterman alignment
- * and the best are returned.
+ * The two-stage search: a prefilter narrows the database to a handful of candidates, then
+ * each candidate is re-scored with an exact alignment and the best are returned.
  *
- * <p>The shape is v1's. What changed is that both stages now use the same scoring
- * scheme, the re-ranking respects HSP boundaries, and the class holds no mutable state.
+ * <p>That shape is v1's, and it was the right idea — the speedup this project is named
+ * for comes from it. What changed underneath is which prefilter runs, that both stages
+ * now agree on what "similar" means, and that the numbers handed back have definitions.
+ *
+ * <p>The class holds no mutable state; the prefilter and aligner it delegates to are each
+ * documented as safe to share. v1's equivalent held a hard-coded working file, which is
+ * why two people searching at once got each other's results.
  */
 public final class SearchService {
 
-    /** How many results the caller gets back. v1 hard-coded 3. */
+    /** Results returned to the caller. v1 hard-coded 3. */
     public static final int DEFAULT_RESULT_LIMIT = 3;
 
-    private final BlastRunner blast;
+    /**
+     * Candidates the prefilter is asked for. Everything past this is never aligned, so it
+     * is the single knob that trades recall against latency — and the reason the whole
+     * pipeline is fast. v1 used 10, then 20.
+     */
+    public static final int DEFAULT_CANDIDATE_LIMIT = 20;
+
+    private final Prefilter prefilter;
     private final Aligner aligner;
     private final int resultLimit;
+    private final int candidateLimit;
 
-    public SearchService(BlastRunner blast) {
-        this(blast, new GotohAligner(ScoringScheme.prefilter()), DEFAULT_RESULT_LIMIT);
+    public SearchService(Prefilter prefilter) {
+        this(prefilter, new GotohAligner(), DEFAULT_RESULT_LIMIT, DEFAULT_CANDIDATE_LIMIT);
     }
 
-    public SearchService(BlastRunner blast, Aligner aligner, int resultLimit) {
-        this.blast = java.util.Objects.requireNonNull(blast, "blast");
+    public SearchService(Prefilter prefilter, Aligner aligner, int resultLimit, int candidateLimit) {
+        this.prefilter = java.util.Objects.requireNonNull(prefilter, "prefilter");
         this.aligner = java.util.Objects.requireNonNull(aligner, "aligner");
         if (resultLimit < 1) throw new IllegalArgumentException("resultLimit must be >= 1");
+        if (candidateLimit < resultLimit) {
+            throw new IllegalArgumentException("candidateLimit must be at least resultLimit");
+        }
         this.resultLimit = resultLimit;
+        this.candidateLimit = candidateLimit;
     }
 
     /**
@@ -49,48 +63,37 @@ public final class SearchService {
         String sequence = SequenceValidator.validate(rawSequence);
         byte[] query = Nucleotides.encode(sequence);
 
-        List<BlastHit> candidates = blast.search(sequence);
+        List<Candidate> candidates = prefilter.candidates(query, candidateLimit);
         List<Match> matches = new ArrayList<>(candidates.size());
 
-        // The best score this query could attain against a perfect copy of itself.
-        // Dividing by this makes scores comparable between queries of different lengths,
-        // which v1's percentage was not.
-        int bestPossible = query.length * aligner.scoring().match();
+        // The score this query would earn against a perfect copy of itself. Dividing by it
+        // makes results comparable between queries of different lengths, which is what
+        // v1's "percentage" was not: that one divided by a length counted from strings
+        // containing gap characters, using a match reward the prefilter never used.
+        final int bestPossible = query.length * aligner.scoring().match();
 
-        for (BlastHit hit : candidates) {
-            int best = 0;
-            double bestBits = 0, bestEValue = Double.MAX_VALUE;
-
-            // Each HSP is a separate local alignment. v1 concatenated the HSP fragments
-            // of a hit and aligned the concatenations, which manufactures alignments
-            // across junctions that exist in neither sequence. See finding 9.
-            for (Hsp hsp : hit.hsps()) {
-                byte[] q = Nucleotides.encode(hsp.queryUngapped());
-                byte[] s = Nucleotides.encode(hsp.subjectUngapped());
-                int score = aligner.score(q, s);
-                if (score > best) {
-                    best = score;
-                    bestBits = hsp.bitScore();
-                    bestEValue = hsp.eValue();
-                }
-            }
-
+        for (Candidate candidate : candidates) {
+            int score = aligner.score(query, candidate.subjectBases());
             matches.add(new Match(
-                    hit.subjectId(), hit.title(), hit.subjectLength(),
-                    best,
-                    bestPossible == 0 ? 0 : (double) best / bestPossible,
-                    bestBits,
-                    bestEValue == Double.MAX_VALUE ? Double.NaN : bestEValue,
-                    hit.alignedLength()));
+                    candidate.subjectId(),
+                    candidate.title(),
+                    candidate.subjectLength(),
+                    score,
+                    bestPossible == 0 ? 0 : (double) score / bestPossible,
+                    candidate.windowStart(),
+                    candidate.seedHits()));
         }
 
         matches.sort(Comparator
                 .comparingInt(Match::alignmentScore).reversed()
-                .thenComparing(Match::eValue, Comparator.nullsLast(Comparator.naturalOrder()))
                 .thenComparing(Match::subjectId));
 
-        return matches.size() <= resultLimit ? List.copyOf(matches) : List.copyOf(matches.subList(0, resultLimit));
+        return matches.size() <= resultLimit
+                ? List.copyOf(matches)
+                : List.copyOf(matches.subList(0, resultLimit));
     }
 
     public Aligner aligner() { return aligner; }
+
+    public Prefilter prefilter() { return prefilter; }
 }

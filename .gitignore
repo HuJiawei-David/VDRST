@@ -34,7 +34,7 @@ bench/results/
 jmh-result.*
 
 # Generated corpora (regenerate with `make corpus`, seed is fixed)
-bench/corpus/
+bench/corpus*/
 
 # Local configuration and secrets — never commit credentials.
 # v1 committed a live MySQL password; see RETROSPECTIVE.md finding 1.

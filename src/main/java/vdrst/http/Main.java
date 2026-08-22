@@ -230,6 +230,8 @@ public final class Main {
                    font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
           .bar { height:4px; border-radius:2px; background:var(--accent); min-width:2px; }
           .err { color:#c0392b; margin-top:1rem; font-size:.9rem; }
+          .note { color:var(--dim); font-size:.82rem; }
+          .caveat { color:var(--dim); font-size:.82rem; margin-top:.9rem; }
           @media (prefers-color-scheme: dark) { .err { color:#e08e84; } }
         </style>
         </head>
@@ -237,7 +239,9 @@ public final class Main {
         <main>
           <h1>VDRST</h1>
           <p class="sub">Paste a DNA or RNA sequence. A k-mer index narrows the database,
-             then each candidate is re-aligned exactly with a vectorised Smith-Waterman.</p>
+             then each candidate is re-aligned exactly with a vectorised Smith-Waterman.<br>
+             <span class="note">Scores are alignment scores, not E-values — a short query
+             finds chance matches in a database this size. Use a few hundred bases.</span></p>
 
           <textarea id="q" spellcheck="false"
             placeholder="ACGTACGTACGT&#10;&#10;FASTA headers are fine — they are stripped."></textarea>
@@ -263,10 +267,13 @@ public final class Main {
             const data = await res.json();
             if (!res.ok) { $('e').textContent = data.error || 'Search failed.'; return; }
             $('t').textContent = data.elapsedMs.toFixed(2) + ' ms server-side';
+            const shortQuery = sequence.replace(/[^A-Za-z]/g, '').length < 100;
             if (!data.matches.length) { $('e').textContent = 'No matches.'; return; }
             $('out').innerHTML =
               '<table><thead><tr><th>Sequence</th><th style="text-align:right">Score</th>' +
-              '<th style="text-align:right">Identity</th><th style="width:28%">&nbsp;</th></tr></thead><tbody>' +
+              '<th style="text-align:right" title="Alignment score as a fraction of the best this ' +
+              'query could score against a perfect copy of itself. Not sequence identity.">' +
+              'of max</th><th style="width:28%">&nbsp;</th></tr></thead><tbody>' +
               data.matches.map(m => {
                 const pct = (m.normalizedScore * 100).toFixed(1);
                 return '<tr><td>' + esc(m.subjectId) +
@@ -274,7 +281,10 @@ public final class Main {
                   '<td class="num">' + m.alignmentScore + '</td>' +
                   '<td class="num">' + pct + '%</td>' +
                   '<td><div class="bar" style="width:' + Math.max(2, m.normalizedScore * 100) + '%"></div></td></tr>';
-              }).join('') + '</tbody></table>';
+              }).join('') + '</tbody></table>' +
+              (shortQuery ? '<p class="caveat">This query is short. In a database of this size ' +
+                'a random sequence of the same length scores similarly, so treat these as ' +
+                'candidates rather than findings.</p>' : '');
           } catch (err) {
             $('e').textContent = 'Could not reach the server.';
           } finally {

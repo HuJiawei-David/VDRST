@@ -183,8 +183,30 @@ curl -X POST localhost:9090/search \
 ```
 
 `normalizedScore` is the alignment score as a fraction of the best this query could achieve
-against a perfect copy of itself, so it is comparable between queries of different lengths.
-[v1's "percentage" was not](RETROSPECTIVE.md#8-a-percentage-that-could-not-be-compared-to-anything).
+against a perfect copy of itself. It is comparable between queries of similar length, which
+[v1's "percentage" was not](RETROSPECTIVE.md#8-a-percentage-that-could-not-be-compared-to-anything)
+— but see Limitations below before reading it as sequence identity, which it is not.
+
+### Limitations
+
+**No E-values.** Results carry an alignment score, not a statistical significance. That
+matters more than it sounds: in a database of tens of millions of bases there is enough
+sequence that a *random* 20-mer finds something scoring around 70% of its maximum. Without
+an E-value there is nothing in the output separating that from a real hit, so queries below
+30 bases are rejected outright and the interface says plainly that short queries find
+matches by chance. A proper Karlin-Altschul E-value is the honest fix and is not
+implemented; this is a threshold standing in for a significance test.
+
+**`normalizedScore` is not percent identity.** It is score over the maximum attainable
+score for that query. With a match reward of 1 the two look similar for a well-aligned
+query and diverge as soon as gaps or mismatches appear.
+
+**Banding is a heuristic.** An indel wider than the 64-base band can push part of an
+alignment out of the searched region. `BandedAlignerTest` pins both sides of that trade.
+The default aligner is unbanded.
+
+**Repeat k-mers are skipped.** A k-mer occurring more than 512 times is treated as carrying
+no signal. That bounds worst-case latency and costs sensitivity on low-complexity queries.
 
 ### Real data
 

@@ -10,8 +10,25 @@ import vdrst.align.Nucleotides;
  */
 public final class SequenceValidator {
 
-    /** Long enough to be meaningful, short enough to bound the O(mn) re-ranking stage. */
-    public static final int MIN_LENGTH = 10;
+    /**
+     * Below this, a search is not meaningful and the interface should say so rather than
+     * return something.
+     *
+     * <p>Two separate reasons, and the statistical one is the important one. A query
+     * shorter than the index's k-mer length produces no seeds at all, so it can only ever
+     * return nothing — accepting it and reporting "no matches" describes a limitation as
+     * though it were a result. And well above that threshold, chance still dominates: in a
+     * database of tens of millions of bases, a random 20-mer finds something scoring
+     * around 70% of its maximum, purely because there is that much sequence to draw from.
+     * Returning those alongside a real hit, with nothing to separate them, is the same
+     * mistake v1 made with its percentage — see RETROSPECTIVE.md finding 8.
+     *
+     * <p>30 is where a random query stops reliably scoring high on this corpus. It is a
+     * threshold, not a significance test; the honest version of that is an E-value, which
+     * this project does not yet compute. README.md says so under Limitations.
+     */
+    public static final int MIN_LENGTH = 30;
+
     public static final int MAX_LENGTH = 100_000;
 
     private SequenceValidator() {}
@@ -40,8 +57,9 @@ public final class SequenceValidator {
         String sequence = cleaned.toString().toUpperCase(java.util.Locale.ROOT);
 
         if (sequence.length() < MIN_LENGTH) {
-            throw new InvalidRequestException(
-                    "sequence must be at least " + MIN_LENGTH + " bases, got " + sequence.length());
+            throw new InvalidRequestException("sequence must be at least " + MIN_LENGTH
+                    + " bases, got " + sequence.length()
+                    + " — shorter queries match this much sequence by chance");
         }
         if (sequence.length() > MAX_LENGTH) {
             throw new InvalidRequestException(

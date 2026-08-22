@@ -10,6 +10,7 @@ import java.nio.file.Paths;
 import java.util.*;
 import java.util.stream.Collectors;
 
+//O(S + M * N)
 @Service
 public class VirusSearchService {
 
@@ -32,7 +33,7 @@ public class VirusSearchService {
                 writer.write("\n");
             }
 
-            // 2. 执行本地BLAST命令
+            // 2. BLAST inner logic
             String[] cmd = {
                     blastExecutable,
                     "-query", queryFile,
@@ -40,12 +41,12 @@ public class VirusSearchService {
                     "-out", blastOutputFile,
                     "-evalue", "100",
                     "-task", "blastn-short",
-                    "-word_size", "4",
+                    "-word_size", "4", //High matching probability
                     "-reward", "1",
                     "-penalty", "-2",
                     "-gapopen", "2",
                     "-gapextend", "2",
-                    "-max_target_seqs", "10",
+                    "-max_target_seqs", "20", //reduce the time complexity
                     "-max_hsps", "5"
             };
 
@@ -67,6 +68,7 @@ public class VirusSearchService {
             // 4. 解析 BLAST 结果为Candidates
             List<Candidate> candidates = parseBlastOutput(rawBlastResult.toString());
 
+            //O(N + M * L)
             // 5. 使用Smith-Waterman对每个candidate进行精细比对得分（百分制）
             String querySequence = sequence.trim();
             for (Candidate candidate : candidates) {
@@ -99,7 +101,7 @@ public class VirusSearchService {
 
             // 7. 转换为VirusMatch对象返回
             List<VirusMatch> matches = new ArrayList<>();
-            for (Candidate c : topCandidates) {
+            for (Candidate c : topCandidates) { // m^2
                 VirusMatch match = new VirusMatch();
                 match.setMatchedSequence(c.description);
                 match.setSimilarityScore(c.similarityScore);
@@ -248,9 +250,13 @@ public class VirusSearchService {
         return candidates;
     }
 
+    //O (m * n)
+
     /**
-     * Smith-Waterman局部比对算法实现（简化示例）
+     * Smith-Waterman
      */
+
+    //O (s * M * N)
     private int runSmithWaterman(String query, String subject) {
         int matchScore = 2;
         int mismatchScore = -1;
@@ -261,8 +267,8 @@ public class VirusSearchService {
         int[][] H = new int[qlen + 1][slen + 1];
 
         int maxScore = 0;
-        for (int i = 1; i <= qlen; i++) {
-            for (int j = 1; j <= slen; j++) {
+        for (int i = 1; i <= qlen; i++) { // m the length of DNA i searched
+            for (int j = 1; j <= slen; j++) {  // length of in single virus sequence
                 char qChar = query.charAt(i - 1);
                 char sChar = subject.charAt(j - 1);
                 int scoreDiag = H[i - 1][j - 1] + (qChar == sChar ? matchScore : mismatchScore);

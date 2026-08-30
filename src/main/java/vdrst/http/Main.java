@@ -57,6 +57,9 @@ public final class Main {
                 + (4L << (2 * k));
         System.out.printf("  %,d genomes, %,d bases — index needs about %,d MB (k=%d, stride=%d)%n",
                 store.count(), store.totalBases(), estimate / 1048576, k, stride);
+        if (store.ambiguityCodes() > 0) {
+            System.out.printf("  %,d IUPAC ambiguity bases folded to N%n", store.ambiguityCodes());
+        }
         if (estimate > Runtime.getRuntime().maxMemory()) {
             System.out.printf("  heap is %,d MB. Raise it with -Xmx, or halve the index with --stride 2.%n",
                     Runtime.getRuntime().maxMemory() / 1048576);

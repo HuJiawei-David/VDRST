@@ -123,6 +123,38 @@ public final class KmerPrefilterTest {
         }
     }
 
+    @Test("a match starting at position 0 of a genome is attributed to that genome")
+    public void boundaryMatchIsAttributedCorrectly() throws Exception {
+        // Diagonals are binned in groups of 16 and the bin rounds down, so a match whose
+        // diagonal sits within 15 positions of a genome boundary used to resolve into the
+        // genome before it. Found by an HIV-1 query against the real NCBI database: the
+        // alignment begins at position 0 of NC_001802.1, and the hit came back attributed
+        // to the neighbouring record. The boundary here is 37 — deliberately not a
+        // multiple of 16 — and the query is the start of the second genome.
+        java.nio.file.Path fasta = java.nio.file.Files
+                .createTempDirectory("vdrst-boundary").resolve("two.fasta");
+        java.util.SplittableRandom rng = new java.util.SplittableRandom(99);
+        String left = randomBases(rng, 37);
+        String right = randomBases(rng, 300);
+        java.nio.file.Files.writeString(fasta,
+                ">left filler genome\n" + left + "\n>right target genome\n" + right + "\n");
+
+        KmerIndex index = KmerIndex.build(GenomeStore.load(fasta));
+        Prefilter prefilter = new KmerPrefilter(index);
+
+        List<Candidate> candidates =
+                prefilter.candidates(Nucleotides.encode(right.substring(0, 60)), 5);
+        Assert.isTrue(!candidates.isEmpty(), "the planted prefix found nothing at all");
+        Assert.equal("right", candidates.get(0).subjectId(),
+                "a match at position 0 of 'right' was attributed to the wrong genome");
+    }
+
+    private static String randomBases(java.util.SplittableRandom rng, int length) {
+        StringBuilder out = new StringBuilder(length);
+        for (int i = 0; i < length; i++) out.append("ACGT".charAt(rng.nextInt(4)));
+        return out.toString();
+    }
+
     @Test("a query shorter than k returns nothing rather than failing")
     public void queryShorterThanK() {
         Prefilter prefilter = new KmerPrefilter(TestCorpus.index());

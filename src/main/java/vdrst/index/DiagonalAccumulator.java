@@ -45,6 +45,15 @@ public final class DiagonalAccumulator {
     private int[] bestQueryOffset;
 
     /**
+     * The subject position of the first seed recorded on each diagonal. Kept because the
+     * binned diagonal is rounded down by up to 15 positions, and resolving a genome from
+     * the rounded value walks off the front of any alignment that starts within those 15
+     * bases of a genome boundary — attributing the hit to the previous genome. A real
+     * seed position cannot be outside its own genome.
+     */
+    private int[] subjectAnchor;
+
+    /**
      * The slots claimed this generation, in the order they were claimed. Readers walk
      * this instead of scanning the whole capacity: after the table has grown for a heavy
      * query, a typical query occupies a few hundred slots of a table sized for a hundred
@@ -70,6 +79,7 @@ public final class DiagonalAccumulator {
         this.counts = new int[capacity];
         this.generations = new int[capacity];
         this.bestQueryOffset = new int[capacity];
+        this.subjectAnchor = new int[capacity];
         this.liveSlots = new int[capacity];
     }
 
@@ -104,6 +114,7 @@ public final class DiagonalAccumulator {
                 keys[slot] = diagonal;
                 counts[slot] = 1;
                 bestQueryOffset[slot] = queryOffset;
+                subjectAnchor[slot] = subjectPosition;
                 liveSlots[occupied++] = slot;
                 return;
             }
@@ -122,7 +133,7 @@ public final class DiagonalAccumulator {
      */
     private void grow() {
         int[] oldKeys = keys, oldCounts = counts, oldOffsets = bestQueryOffset;
-        int[] oldLive = liveSlots;
+        int[] oldAnchors = subjectAnchor, oldLive = liveSlots;
 
         allocate(oldKeys.length << 1);
         generation = 1;                                      // fresh arrays are all zero
@@ -135,6 +146,7 @@ public final class DiagonalAccumulator {
             keys[slot] = oldKeys[old];
             counts[slot] = oldCounts[old];
             bestQueryOffset[slot] = oldOffsets[old];
+            subjectAnchor[slot] = oldAnchors[old];
             liveSlots[i] = slot;
         }
     }
@@ -150,6 +162,9 @@ public final class DiagonalAccumulator {
     public int countAt(int slot) { return counts[slot]; }
 
     public int queryOffsetAt(int slot) { return bestQueryOffset[slot]; }
+
+    /** The subject position of the first seed recorded in this slot — always in-genome. */
+    public int anchorAt(int slot) { return subjectAnchor[slot]; }
 
     /** Fibonacci hashing — cheap, and spreads sequential diagonals across the table. */
     private static int mix(int value) {

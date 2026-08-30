@@ -149,16 +149,12 @@ public final class KmerPrefilter implements Prefilter {
 
         for (int i = 0; i < live; i++) {
             int slot = diagonals.liveSlotAt(i);
-            int count = diagonals.countAt(slot);
-            if (count < MIN_SEEDS) continue;
-
-            int anchor = diagonals.diagonalAt(slot) + diagonals.queryOffsetAt(slot);
-            if (anchor < 0 || anchor >= store.totalBases()) continue;
+            if (diagonals.countAt(slot) < MIN_SEEDS) continue;
 
             // Sorts ascending as (count, then later arrivals first), so the descending
             // walk below sees higher counts first and, within a count, earlier arrivals
             // first — the same order the old stable sort produced.
-            hitKeys[n] = ((long) count << 32) | (0xFFFF_FFFFL - n);
+            hitKeys[n] = ((long) diagonals.countAt(slot) << 32) | (0xFFFF_FFFFL - n);
             hitSlots[n] = slot;
             n++;
         }
@@ -171,7 +167,13 @@ public final class KmerPrefilter implements Prefilter {
         for (int i = n - 1; i >= 0 && candidates.size() < limit; i--) {
             int slot = hitSlots[(int) (0xFFFF_FFFFL - (hitKeys[i] & 0xFFFF_FFFFL))];
             int diagonal = diagonals.diagonalAt(slot);
-            int genome = store.genomeAt(diagonal + diagonals.queryOffsetAt(slot));
+
+            // The genome comes from a real seed position, never from the binned diagonal:
+            // the bin rounds down by up to 15, and an alignment starting that close to a
+            // genome boundary would resolve into the wrong genome. Found, not foreseen —
+            // an HIV-1 query against the real database came back attributed to the
+            // neighbouring record, because its match begins at position 0 of the genome.
+            int genome = store.genomeAt(diagonals.anchorAt(slot));
 
             if (local.genomeSeen[genome] == generation) continue;
             local.genomeSeen[genome] = generation;

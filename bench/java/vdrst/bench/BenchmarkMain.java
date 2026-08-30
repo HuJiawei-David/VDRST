@@ -20,7 +20,9 @@ import java.util.List;
  *   B2   blastn subprocess     + affine-gap Gotoh
  *   B3   in-process k-mer      + affine-gap Gotoh
  *   B4   in-process k-mer      + banded Gotoh
- *   B5   in-process k-mer      + vectorised Gotoh      (v2, as shipped)
+ *   B5   in-process k-mer      + vectorised Gotoh, 32-bit lanes, masked   (v2.0)
+ *   B6   in-process k-mer      + vectorised Gotoh, 16-bit lanes, no masks
+ *   B7   B6 with the candidates scored in parallel                        (v2.1)
  * </pre>
  *
  * <p>B0 is the honest baseline: what "search the database with Smith-Waterman" costs when
@@ -45,21 +47,31 @@ public final class BenchmarkMain {
         String database = argument(args, "--db", corpusDir.resolve("viruses.fasta").toString());
         int warmup = Integer.parseInt(argument(args, "--warmup", String.valueOf(DEFAULT_WARMUP)));
         int iterations = Integer.parseInt(argument(args, "--iterations", String.valueOf(DEFAULT_ITERATIONS)));
+        int k = Integer.parseInt(argument(args, "--k", String.valueOf(KmerIndex.DEFAULT_K)));
+        int stride = Integer.parseInt(argument(args, "--stride", "1"));
+        int sampleQueries = Integer.parseInt(argument(args, "--sample-queries", "0"));
+        int queryLength = Integer.parseInt(argument(args, "--query-length", "300"));
         boolean skipBaseline = List.of(args).contains("--skip-baseline");
         boolean skipBlast = List.of(args).contains("--skip-blast");
 
-        List<String> queries = Files.readAllLines(corpusDir.resolve("queries.txt"));
-        if (queries.isEmpty()) throw new IllegalStateException("no queries in " + corpusDir);
+        long t0 = System.nanoTime();
+        GenomeStore store = GenomeStore.load(Paths.get(database));
+        long t1 = System.nanoTime();
+        KmerIndex index = KmerIndex.build(store, k, stride);
+        long t2 = System.nanoTime();
+
+        // Either the corpus's planted queries, or — for a real database, which plants
+        // nothing — windows sampled from the database itself with a fixed seed, mutated
+        // the way a related-but-not-identical isolate would be, so the alignment stage
+        // does real work instead of recognising perfect copies.
+        List<String> queries = sampleQueries > 0
+                ? sampleFromStore(store, sampleQueries, queryLength)
+                : Files.readAllLines(corpusDir.resolve("queries.txt"));
+        if (queries.isEmpty()) throw new IllegalStateException("no queries to run");
         byte[][] encoded = new byte[queries.size()][];
         for (int i = 0; i < queries.size(); i++) encoded[i] = Nucleotides.encode(queries.get(i));
 
         printEnvironment(database, queries);
-
-        long t0 = System.nanoTime();
-        GenomeStore store = GenomeStore.load(corpusDir.resolve("viruses.fasta"));
-        long t1 = System.nanoTime();
-        KmerIndex index = KmerIndex.build(store);
-        long t2 = System.nanoTime();
 
         System.out.printf("  corpus       %,d genomes, %,d bases, read in %.2f s%n",
                 store.count(), store.totalBases(), (t1 - t0) / 1e9);
@@ -86,10 +98,14 @@ public final class BenchmarkMain {
                     new GotohAligner(ScoringScheme.prefilter()), encoded, warmup, iterations));
             results.add(measure("B4  k-mer index + Gotoh banded", kmer,
                     new BandedGotohAligner(ScoringScheme.prefilter(), 64), encoded, warmup, iterations));
-            results.add(measure("B5  k-mer index + Gotoh SIMD", kmer,
+            results.add(measure("B5  k-mer index + SIMD 32-bit masked", kmer,
                     new VectorGotohAligner(ScoringScheme.prefilter()), encoded, warmup, iterations));
+            results.add(measure("B6  k-mer index + SIMD 16-bit maskless", kmer,
+                    new ShortGotohAligner(ScoringScheme.prefilter()), encoded, warmup, iterations));
+            results.add(measureParallel("B7  B6 + candidates in parallel", kmer,
+                    new ShortGotohAligner(ScoringScheme.prefilter()), encoded, warmup, iterations));
 
-            printLatencyBudget(kmer, new VectorGotohAligner(ScoringScheme.prefilter()), encoded, warmup, iterations);
+            printLatencyBudget(kmer, new ShortGotohAligner(ScoringScheme.prefilter()), encoded, warmup, iterations);
         }
 
         System.out.println("\n  results");
@@ -166,6 +182,71 @@ public final class BenchmarkMain {
         return best;
     }
 
+    private static Samples measureParallel(String label, Prefilter prefilter, Aligner aligner,
+                                           byte[][] queries, int warmup, int iterations) {
+        warmup = Math.max(1, warmup);
+        iterations = Math.max(3, iterations);
+
+        for (int i = 0; i < warmup; i++) {
+            checksum += pipelineParallel(prefilter, aligner, queries[i % queries.length]);
+        }
+
+        long[] samples = new long[iterations];
+        for (int i = 0; i < iterations; i++) {
+            byte[] query = queries[i % queries.length];
+            long started = System.nanoTime();
+            checksum += pipelineParallel(prefilter, aligner, query);
+            samples[i] = System.nanoTime() - started;
+        }
+
+        System.out.println("  " + label + "   done (" + iterations + " samples)");
+        return Samples.of(label, samples);
+    }
+
+    /** The same work as {@link #pipeline}, scored the way SearchService scores it. */
+    private static long pipelineParallel(Prefilter prefilter, Aligner aligner, byte[] query) {
+        List<Candidate> candidates = prefilter.candidates(query, 20);
+        return java.util.stream.IntStream.range(0, candidates.size()).parallel()
+                .mapToLong(i -> aligner.score(query, candidates.get(i).subjectBases()))
+                .max().orElse(0);
+    }
+
+    /**
+     * Windows drawn from the database itself, each mutated with 3% substitutions and a
+     * couple of short indels — a related isolate rather than a perfect copy, so scoring
+     * has actual differences to charge for. Fixed seed; the same flags redraw the same
+     * queries anywhere.
+     */
+    private static List<String> sampleFromStore(GenomeStore store, int count, int length) {
+        java.util.SplittableRandom rng = new java.util.SplittableRandom(0x5EEDC0FFEEL);
+        List<String> queries = new ArrayList<>(count);
+
+        while (queries.size() < count) {
+            int genome = rng.nextInt(store.count());
+            if (store.length(genome) < length) continue;
+            int offset = store.start(genome) + rng.nextInt(store.length(genome) - length + 1);
+            byte[] window = java.util.Arrays.copyOfRange(store.bases(), offset, offset + length);
+
+            int ambiguous = 0;
+            for (byte base : window) if (base == Nucleotides.N) ambiguous++;
+            if (ambiguous > length / 10) continue;           // an N-run tells the aligner nothing
+
+            for (int i = 0; i < window.length; i++) {        // ~3% substitutions
+                if (rng.nextInt(100) < 3) window[i] = (byte) rng.nextInt(4);
+            }
+            for (int indel = 0; indel < 2; indel++) {        // two short deletions
+                int at = rng.nextInt(window.length - 8);
+                int width = 1 + rng.nextInt(4);
+                byte[] shorter = new byte[window.length - width];
+                System.arraycopy(window, 0, shorter, 0, at);
+                System.arraycopy(window, at + width, shorter, at, window.length - width - at);
+                window = shorter;
+            }
+            queries.add(Nucleotides.decode(window));
+        }
+        return queries;
+    }
+
     /**
      * Splits the pipeline into prefilter and alignment. Which half dominates decides what
      * is worth optimising next; getting this backwards is the most reliable way to spend a
@@ -198,7 +279,7 @@ public final class BenchmarkMain {
         Samples align = Samples.of("alignment", alignNanos);
         double total = pre.medianMillis() + align.medianMillis();
 
-        System.out.println("\n  latency budget, v2 as shipped (median of " + iterations + ")");
+        System.out.println("\n  latency budget, prefilter vs serial alignment (median of " + iterations + ")");
         System.out.println("  " + "-".repeat(100));
         System.out.printf("    k-mer prefilter          %8.3f ms   %5.1f%%%n",
                 pre.medianMillis(), 100 * pre.medianMillis() / total);
@@ -216,7 +297,8 @@ public final class BenchmarkMain {
                 System.getProperty("os.name"), System.getProperty("os.arch"));
         System.out.printf("  cpus         %d available to the JVM%n", runtime.availableProcessors());
         System.out.printf("  heap         %,d MB max%n", runtime.maxMemory() / (1024 * 1024));
-        System.out.printf("  vectors      %s%n", VectorGotohAligner.speciesDescription());
+        System.out.printf("  vectors      %s int, %s short%n",
+                VectorGotohAligner.speciesDescription(), ShortGotohAligner.speciesDescription());
         System.out.printf("  database     %s%n", database);
         System.out.printf("  queries      %d, %d bases each%n", queries.size(), queries.get(0).length());
     }

@@ -8,6 +8,12 @@ genomes, 552 million bases — on a plain M1 laptop. That is 30x faster than v2.
 same machine; on the reproducible synthetic corpus, the full benchmark ladder spans
 68,333x from the unfiltered baseline.
 
+### [Try it →  vdrst-hujiawei.australiaeast.cloudapp.azure.com](https://vdrst-hujiawei.australiaeast.cloudapp.azure.com)
+
+Live against the real database — all 18,802 genomes and 554,893,834 bases of NCBI's
+current `ref_viruses_rep_genomes`, indexed in memory. Paste a few hundred bases of any
+viral sequence, or borrow one from the examples below.
+
 Written in 2024 as my first project. Rebuilt in 2026 with benchmarks, tests, and
 [a written retrospective](RETROSPECTIVE.md) of everything the first version got wrong. The
 original is preserved at [`v1.1-2024-complete`](../../tree/v1.1-2024-complete). Optimised
@@ -155,6 +161,35 @@ warmup.</sub>
 Over HTTP the story holds: 1,000 keep-alive requests against `localhost:9090` with real
 300-base queries measure **p50 0.83 ms wall time** end to end, of which the search itself
 is 0.48 ms and the rest is HTTP, JSON and loopback.
+
+### On the public deployment
+
+The live service runs the same code on a 2-vCPU Azure VM in Australia East, and reports
+its own server-side time in every response. Measured from a laptop in New Zealand:
+
+| | |
+|---|---:|
+| server-side search, as reported by the service | **1.0–1.6 ms** |
+| wall time, connection reused | 36–82 ms |
+| wall time, new TLS connection each request | 112–154 ms |
+
+The gap is the Tasman Sea, not the search. Roughly 30 ms of every request is the
+round trip to Sydney and back, and a fresh TLS handshake costs two more of them — so the
+honest way to read the table is that the network is two orders of magnitude more
+expensive than the thing this project optimises. The server-side number is the one the
+benchmarks above are about; it is quoted separately here precisely so the two are not
+blended into a single flattering figure.
+
+One thing the cloud machine does better than the laptop: its AMD cores carry AVX2, so
+the 16-bit kernel gets **16 lanes per vector instead of the M1's 8**. Same source, same
+`ShortGotohAligner`, twice the lanes — which is the payoff for the maskless design that
+this page's benchmarks section is mostly about.
+
+The public deployment is bounded, because a search is priced in CPU and a public URL
+attracts more than curiosity — the machine's first scanner probe arrived within twelve
+minutes of the port opening, looking for WordPress endpoints. It answers 30 requests per
+minute per client and caps queries at 5,000 bases; both are flags, and both default to
+off, because a service on localhost has no door to guard.
 
 ### Three real answers
 
@@ -345,8 +380,36 @@ The default aligner is unbanded.
 no signal. That bounds worst-case latency and costs sensitivity on low-complexity queries.
 
 **IUPAC ambiguity codes fold to N.** Real databases contain them — `ref_viruses_rep_genomes`
-has 9,885 — and folding keeps them out of the index without pretending to know which base
-they were. The count is reported at startup. Query-side validation stays strict.
+has 9,885 in the December 2024 volumes and 10,197 in the current ones — and folding keeps
+them out of the index without pretending to know which base they were. The count is
+reported at startup. Query-side validation stays strict.
+
+**The public deployment is bounded.** 30 requests per minute per client, queries capped at
+5,000 bases. Alignment cost grows with the square of the query, so an uncapped 16,000-base
+request measured close to two seconds of CPU on the live service. Both bounds are flags
+and both default to off; a private instance has neither.
+
+### Deploying it
+
+`deploy/cloud-init.yaml` provisions a host from nothing: JDK 21, the real NCBI database
+fetched from the FTP archive and exported to FASTA, the service under systemd, and Caddy
+in front for automatic TLS. It is the file the live deployment was built from, with the
+three things that went wrong the first time already fixed in it — Caddy needs its own apt
+repository, its config file cannot be written before the package is unpacked (dpkg asks
+about the conflict, and an unattended install has nobody to answer), and Ubuntu does not
+ship `update_blastdb.pl`.
+
+```bash
+az vm create --resource-group vdrst-rg --name vdrst-vm \
+  --image Ubuntu2404 --size Standard_B2als_v2 \
+  --admin-username azureuser --ssh-key-values ~/.ssh/your_key.pub \
+  --public-ip-address-dns-name your-label \
+  --os-disk-size-gb 64 --custom-data deploy/cloud-init.yaml --nsg-rule NONE
+```
+
+Change the domain in the staged `Caddyfile` to your own, open 80 and 443, and the host
+brings itself up: about 15 minutes, most of it the 190 MB database download and the 28 s
+index build. 2 vCPU and 4 GiB is enough for the full real database at `k=13, stride 2`.
 
 ### Serving the real database
 

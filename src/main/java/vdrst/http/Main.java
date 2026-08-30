@@ -73,6 +73,13 @@ public final class Main {
         Prefilter prefilter = new KmerPrefilter(index);
         SearchService service = new SearchService(prefilter);
 
+        // The first requests otherwise pay for JIT compilation of the entire pipeline —
+        // hundreds of milliseconds a benchmark never sees, because benchmarks warm up,
+        // and the first person to paste a sequence does not. So warm up here, on
+        // sequences drawn from the database itself, before the port opens.
+        int warmupIterations = Integer.parseInt(argument(args, "--warmup", "300"));
+        warmup(service, store, warmupIterations);
+
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
         server.createContext("/search", exchange -> handleSearch(exchange, service));
         server.createContext("/health", Main::handleHealth);
@@ -84,6 +91,30 @@ public final class Main {
         server.start();
 
         System.out.println("  listening on http://localhost:" + port);
+    }
+
+    private static void warmup(SearchService service, GenomeStore store, int iterations) {
+        if (iterations <= 0 || store.count() == 0) return;
+        long started = System.nanoTime();
+        java.util.SplittableRandom rng = new java.util.SplittableRandom(0x5EEDL);
+        int ran = 0;
+
+        for (int i = 0; i < iterations; i++) {
+            int genome = rng.nextInt(store.count());
+            int length = Math.min(300, store.length(genome));
+            if (length < SequenceValidator.MIN_LENGTH) continue;
+            int offset = store.start(genome) + rng.nextInt(store.length(genome) - length + 1);
+            String sequence = vdrst.align.Nucleotides.decode(
+                    java.util.Arrays.copyOfRange(store.bases(), offset, offset + length));
+            try {
+                service.search(sequence);
+                ran++;
+            } catch (SequenceValidator.InvalidRequestException ignored) {
+                // A window of all N validates but cannot be helped; skip it.
+            }
+        }
+        System.out.printf("  warm: %d searches in %.1f s — the first request pays no JIT tax%n",
+                ran, (System.nanoTime() - started) / 1e9);
     }
 
     private static void handleSearch(HttpExchange exchange, SearchService service) throws IOException {
@@ -102,9 +133,9 @@ public final class Main {
 
             long started = System.nanoTime();
             List<Match> matches = service.search(sequence);
-            double millis = (System.nanoTime() - started) / 1e6;
+            long nanos = System.nanoTime() - started;
 
-            respond(exchange, 200, render(matches, millis));
+            respond(exchange, 200, render(matches, nanos));
 
         } catch (SequenceValidator.InvalidRequestException | Json.MalformedJsonException e) {
             respond(exchange, 400, "{\"error\":" + Json.quote(e.getMessage()) + "}");
@@ -115,9 +146,11 @@ public final class Main {
         }
     }
 
-    private static String render(List<Match> matches, double millis) {
-        StringBuilder out = new StringBuilder(256);
-        out.append("{\"elapsedMs\":").append(String.format("%.3f", millis)).append(",\"matches\":[");
+    private static String render(List<Match> matches, long nanos) {
+        StringBuilder out = new StringBuilder(512);
+        out.append("{\"elapsedMs\":");
+        appendFixed(out, (nanos + 500) / 1_000, 3);          // microseconds, printed as ms
+        out.append(",\"matches\":[");
         for (int i = 0; i < matches.size(); i++) {
             Match m = matches.get(i);
             if (i > 0) out.append(',');
@@ -125,12 +158,27 @@ public final class Main {
                .append(",\"title\":").append(Json.quote(m.title()))
                .append(",\"subjectLength\":").append(m.subjectLength())
                .append(",\"alignmentScore\":").append(m.alignmentScore())
-               .append(",\"normalizedScore\":").append(String.format("%.4f", m.normalizedScore()))
-               .append(",\"subjectOffset\":").append(m.subjectOffset())
+               .append(",\"normalizedScore\":");
+            appendFixed(out, Math.round(m.normalizedScore() * 10_000), 4);
+            out.append(",\"subjectOffset\":").append(m.subjectOffset())
                .append(",\"seedHits\":").append(m.seedHits())
                .append('}');
         }
         return out.append("]}").toString();
+    }
+
+    /**
+     * Appends {@code scaled / 10^decimals} with exactly {@code decimals} digits — what
+     * {@code String.format} did here, minus the format-string parse, the locale lookup
+     * and the varargs boxing it performs on every call, on the hottest path there is.
+     */
+    private static void appendFixed(StringBuilder out, long scaled, int decimals) {
+        long divisor = 1;
+        for (int i = 0; i < decimals; i++) divisor *= 10;
+        out.append(scaled / divisor).append('.');
+        for (long place = divisor / 10; place >= 1; place /= 10) {
+            out.append((scaled / place) % 10);
+        }
     }
 
     private static void handleHealth(HttpExchange exchange) throws IOException {

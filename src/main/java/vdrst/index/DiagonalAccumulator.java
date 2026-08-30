@@ -20,6 +20,15 @@ package vdrst.index;
  * case. Instead each slot records the generation that wrote it; a slot from an older
  * generation is free. {@link #reset()} is one increment.
  *
+ * <h2>Why it grows</h2>
+ * A 300-base query is 290 k-mers, each allowed up to 512 occurrences before the repeat
+ * cutoff — potentially 148,480 seed hits, and on a large real database most of them land
+ * on distinct diagonals. No fixed size covers that without paying for it on every query,
+ * and an open-addressed table that fills up does not degrade, it stops: the probe loop
+ * has no free slot to find. So the table doubles when it passes half full. Growth is rare
+ * (a handful of times over a process lifetime, since the scratch is reused), costs one
+ * pass over the live entries, and keeps the load factor where linear probing stays flat.
+ *
  * <p>Not thread-safe by design — each searching thread holds its own instance. Sharing one
  * would reintroduce, in miniature, the shared-mutable-state defect that made v1's searches
  * corrupt each other.
@@ -29,11 +38,11 @@ public final class DiagonalAccumulator {
     /** Diagonals are binned in groups of 16, so indels up to 15 bases keep their seeds together. */
     public static final int DIAGONAL_BIN_SHIFT = 4;
 
-    private final int mask;
-    private final int[] keys;
-    private final int[] counts;
-    private final int[] generations;
-    private final int[] bestQueryOffset;
+    private int mask;
+    private int[] keys;
+    private int[] counts;
+    private int[] generations;
+    private int[] bestQueryOffset;
 
     private int generation;
     private int occupied;
@@ -44,7 +53,10 @@ public final class DiagonalAccumulator {
      *                          the load factor under 0.5 where linear probing stays flat
      */
     public DiagonalAccumulator(int expectedDiagonals) {
-        int capacity = Integer.highestOneBit(Math.max(16, expectedDiagonals) - 1) << 2;
+        allocate(Integer.highestOneBit(Math.max(16, expectedDiagonals) - 1) << 2);
+    }
+
+    private void allocate(int capacity) {
         this.mask = capacity - 1;
         this.keys = new int[capacity];
         this.counts = new int[capacity];
@@ -74,6 +86,11 @@ public final class DiagonalAccumulator {
 
         while (true) {
             if (generations[slot] != generation) {           // free slot
+                if (occupied + occupied >= keys.length) {    // past half full — double first
+                    grow();
+                    slot = mix(diagonal) & mask;
+                    continue;
+                }
                 generations[slot] = generation;
                 keys[slot] = diagonal;
                 counts[slot] = 1;
@@ -87,6 +104,26 @@ public final class DiagonalAccumulator {
                 return;
             }
             slot = (slot + 1) & mask;
+        }
+    }
+
+    /** Doubles the table and reinserts the live entries. Dead generations stay behind. */
+    private void grow() {
+        int[] oldKeys = keys, oldCounts = counts, oldGenerations = generations;
+        int[] oldOffsets = bestQueryOffset;
+        int oldGeneration = generation;
+
+        allocate(oldKeys.length << 1);
+        generation = 1;                                      // fresh arrays are all zero
+
+        for (int old = 0; old < oldKeys.length; old++) {
+            if (oldGenerations[old] != oldGeneration) continue;
+            int slot = mix(oldKeys[old]) & mask;
+            while (generations[slot] == generation) slot = (slot + 1) & mask;
+            generations[slot] = generation;
+            keys[slot] = oldKeys[old];
+            counts[slot] = oldCounts[old];
+            bestQueryOffset[slot] = oldOffsets[old];
         }
     }
 

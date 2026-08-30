@@ -96,6 +96,33 @@ public final class KmerPrefilterTest {
         }
     }
 
+    @Test("the diagonal accumulator survives more distinct diagonals than its initial capacity")
+    public void accumulatorGrows() {
+        // A 300-base query is 290 k-mers at up to 512 occurrences each — far more distinct
+        // diagonals than any fixed table covers. Before the table learned to grow, filling
+        // it did not degrade the search, it hung it: the probe loop had no free slot to
+        // find. This drives one instance far past its initial capacity and checks that
+        // every count survived the rehash.
+        DiagonalAccumulator accumulator = new DiagonalAccumulator(16);
+        int distinct = 100_000;
+
+        for (int round = 0; round < 3; round++) {
+            accumulator.reset();
+            for (int d = 0; d < distinct; d++) {
+                accumulator.record(d << DiagonalAccumulator.DIAGONAL_BIN_SHIFT, 0);
+                accumulator.record((d << DiagonalAccumulator.DIAGONAL_BIN_SHIFT) + 1, 0);
+            }
+            Assert.equal(distinct, accumulator.occupiedSlots(),
+                    "entries were lost while the table grew");
+
+            long total = 0;
+            for (int slot = 0; slot < accumulator.capacity(); slot++) {
+                if (accumulator.isLive(slot)) total += accumulator.countAt(slot);
+            }
+            Assert.equal(2L * distinct, total, "seed counts did not survive the rehash");
+        }
+    }
+
     @Test("a query shorter than k returns nothing rather than failing")
     public void queryShorterThanK() {
         Prefilter prefilter = new KmerPrefilter(TestCorpus.index());

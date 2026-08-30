@@ -18,9 +18,11 @@ packages:
   - curl
 
 write_files:
-  # VDRST listens on loopback only; Caddy terminates TLS in front of it. So the search
-  # endpoint is never directly exposed, and X-Forwarded-For arrives over loopback, which
-  # is the one path the rate limiter trusts it on.
+  # VDRST is bound to loopback and Caddy terminates TLS in front of it, so the search
+  # endpoint is unreachable except through the proxy, and X-Forwarded-For arrives over
+  # loopback -- the one path the rate limiter trusts it on. The --bind flag is what makes
+  # that true: without it the server accepts on every interface, and the claim rests
+  # entirely on a firewall rule being right forever.
   - path: /etc/systemd/system/vdrst.service
     content: |
       [Unit]
@@ -41,8 +43,8 @@ write_files:
         -cp target/classes vdrst.http.Main \
         --db /opt/vdrst/data/ref_viruses.fasta \
         --k 13 --stride 2 \
-        --port 9090 \
-        --rate-limit 30 --max-query 10000
+        --bind 127.0.0.1 --port 9090 \
+        --rate-limit 30 --max-query 5000
       # The index takes ~30 s to build before the port opens; systemd must not give up.
       TimeoutStartSec=900
       Restart=always

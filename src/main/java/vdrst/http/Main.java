@@ -49,6 +49,12 @@ public final class Main {
         // --max-query caps the sequence length this deployment accepts, because a
         // 100,000-base query is legitimate on a workstation and a denial-of-service
         // primitive on a public URL.
+        // Which interface to accept connections on. The default is every interface,
+        // because that is what a container needs for a published port to work at all.
+        // A host that terminates TLS in a reverse proxy should pass 127.0.0.1, so the
+        // service is unreachable except through the proxy — belt as well as braces,
+        // since a firewall rule is one console click away from being wrong.
+        String bind = argument(args, "--bind", "0.0.0.0");
         int rateLimit = Integer.parseInt(argument(args, "--rate-limit", "0"));
         int maxQuery = Integer.parseInt(argument(args, "--max-query",
                 String.valueOf(SequenceValidator.MAX_LENGTH)));
@@ -97,7 +103,7 @@ public final class Main {
         warmup(service, store, warmupIterations);
 
         final int maxQueryFinal = maxQuery;
-        HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
+        HttpServer server = HttpServer.create(new InetSocketAddress(bind, port), 0);
         server.createContext("/search",
                 exchange -> handleSearch(exchange, service, limiter, maxQueryFinal));
         server.createContext("/health", Main::handleHealth);
@@ -108,7 +114,8 @@ public final class Main {
         server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
         server.start();
 
-        System.out.println("  listening on http://localhost:" + port);
+        System.out.println("  listening on http://" + bind + ":" + port
+                + ("0.0.0.0".equals(bind) ? "  (every interface)" : "  (this host only)"));
     }
 
     private static void warmup(SearchService service, GenomeStore store, int iterations) {

@@ -38,12 +38,27 @@ public final class SearchService {
     private final Aligner aligner;
     private final int resultLimit;
     private final int candidateLimit;
+    private final boolean parallelAlign;
 
     public SearchService(Prefilter prefilter) {
         this(prefilter, new ShortGotohAligner(), DEFAULT_RESULT_LIMIT, DEFAULT_CANDIDATE_LIMIT);
     }
 
     public SearchService(Prefilter prefilter, Aligner aligner, int resultLimit, int candidateLimit) {
+        this(prefilter, aligner, resultLimit, candidateLimit, true);
+    }
+
+    /**
+     * @param parallelAlign score the candidates on the common pool rather than in
+     *                      sequence. The alignments are independent by construction —
+     *                      each touches only its own candidate's window and its own
+     *                      thread's scratch — so this changes wall-clock time and
+     *                      nothing else. Scores land in a fixed slot per candidate and
+     *                      the final ordering is a sort, so results are identical
+     *                      either way; {@code ConcurrentSearchTest} holds regardless.
+     */
+    public SearchService(Prefilter prefilter, Aligner aligner, int resultLimit, int candidateLimit,
+                         boolean parallelAlign) {
         this.prefilter = java.util.Objects.requireNonNull(prefilter, "prefilter");
         this.aligner = java.util.Objects.requireNonNull(aligner, "aligner");
         if (resultLimit < 1) throw new IllegalArgumentException("resultLimit must be >= 1");
@@ -52,6 +67,7 @@ public final class SearchService {
         }
         this.resultLimit = resultLimit;
         this.candidateLimit = candidateLimit;
+        this.parallelAlign = parallelAlign;
     }
 
     /**
@@ -66,20 +82,34 @@ public final class SearchService {
         List<Candidate> candidates = prefilter.candidates(query, candidateLimit);
         List<Match> matches = new ArrayList<>(candidates.size());
 
+        // The candidates are scored independently, so on an idle machine the alignment
+        // stage costs one alignment's wall time instead of twenty. Under saturation the
+        // pool is busy and this degrades toward serial, which is the right degradation:
+        // parallelism here spends idle cores on latency, never throughput on ceremony.
+        final int[] scores = new int[candidates.size()];
+        if (parallelAlign && candidates.size() > 1) {
+            java.util.stream.IntStream.range(0, candidates.size()).parallel()
+                    .forEach(i -> scores[i] = aligner.score(query, candidates.get(i).subjectBases()));
+        } else {
+            for (int i = 0; i < candidates.size(); i++) {
+                scores[i] = aligner.score(query, candidates.get(i).subjectBases());
+            }
+        }
+
         // The score this query would earn against a perfect copy of itself. Dividing by it
         // makes results comparable between queries of different lengths, which is what
         // v1's "percentage" was not: that one divided by a length counted from strings
         // containing gap characters, using a match reward the prefilter never used.
         final int bestPossible = query.length * aligner.scoring().match();
 
-        for (Candidate candidate : candidates) {
-            int score = aligner.score(query, candidate.subjectBases());
+        for (int i = 0; i < candidates.size(); i++) {
+            Candidate candidate = candidates.get(i);
             matches.add(new Match(
                     candidate.subjectId(),
                     candidate.title(),
                     candidate.subjectLength(),
-                    score,
-                    bestPossible == 0 ? 0 : (double) score / bestPossible,
+                    scores[i],
+                    bestPossible == 0 ? 0 : (double) scores[i] / bestPossible,
                     candidate.windowStart(),
                     candidate.seedHits()));
         }

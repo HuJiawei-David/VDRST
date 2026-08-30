@@ -44,6 +44,15 @@ public final class Main {
         int k = Integer.parseInt(argument(args, "--k", String.valueOf(KmerIndex.DEFAULT_K)));
         int stride = Integer.parseInt(argument(args, "--stride", "1"));
 
+        // Door policy, for deployments facing the public internet. Off by default:
+        // localhost has no door to guard. --rate-limit is requests per minute per client;
+        // --max-query caps the sequence length this deployment accepts, because a
+        // 100,000-base query is legitimate on a workstation and a denial-of-service
+        // primitive on a public URL.
+        int rateLimit = Integer.parseInt(argument(args, "--rate-limit", "0"));
+        int maxQuery = Integer.parseInt(argument(args, "--max-query",
+                String.valueOf(SequenceValidator.MAX_LENGTH)));
+
         requireFasta(database);
 
         System.out.println("VDRST — loading " + database);
@@ -72,6 +81,13 @@ public final class Main {
 
         Prefilter prefilter = new KmerPrefilter(index);
         SearchService service = new SearchService(prefilter);
+        RateLimiter limiter = rateLimit > 0
+                ? new RateLimiter(rateLimit, Math.max(5, rateLimit / 3))
+                : null;
+        if (limiter != null) {
+            System.out.printf("  door: %d requests/min per client, queries capped at %,d bases%n",
+                    rateLimit, maxQuery);
+        }
 
         // The first requests otherwise pay for JIT compilation of the entire pipeline —
         // hundreds of milliseconds a benchmark never sees, because benchmarks warm up,
@@ -80,8 +96,10 @@ public final class Main {
         int warmupIterations = Integer.parseInt(argument(args, "--warmup", "300"));
         warmup(service, store, warmupIterations);
 
+        final int maxQueryFinal = maxQuery;
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
-        server.createContext("/search", exchange -> handleSearch(exchange, service));
+        server.createContext("/search",
+                exchange -> handleSearch(exchange, service, limiter, maxQueryFinal));
         server.createContext("/health", Main::handleHealth);
         server.createContext("/", Main::handleIndex);
 
@@ -117,17 +135,37 @@ public final class Main {
                 ran, (System.nanoTime() - started) / 1e9);
     }
 
-    private static void handleSearch(HttpExchange exchange, SearchService service) throws IOException {
+    private static void handleSearch(HttpExchange exchange, SearchService service,
+                                     RateLimiter limiter, int maxQuery) throws IOException {
         if (!"POST".equals(exchange.getRequestMethod())) {
             respond(exchange, 405, "{\"error\":\"use POST\"}");
             return;
         }
 
+        if (limiter != null && !limiter.tryAcquire(clientOf(exchange))) {
+            exchange.getResponseHeaders().set("Retry-After", "2");
+            respond(exchange, 429, "{\"error\":\"rate limit exceeded — try again in a moment\"}");
+            return;
+        }
+
         try {
-            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            // The body is read up to a bound derived from the query cap, so an
+            // arbitrarily large upload is refused instead of buffered.
+            byte[] raw = readBounded(exchange.getRequestBody(), maxQuery + 65_536);
+            if (raw == null) {
+                respond(exchange, 413, "{\"error\":\"request too large for this deployment\"}");
+                return;
+            }
+
+            String body = new String(raw, StandardCharsets.UTF_8);
             String sequence = Json.readString(body, "sequence");
             if (sequence == null) {
                 respond(exchange, 400, "{\"error\":\"missing field \\\"sequence\\\"\"}");
+                return;
+            }
+            if (sequence.length() > maxQuery + 8_192) {
+                respond(exchange, 400, "{\"error\":\"this deployment accepts queries up to "
+                        + maxQuery + " bases\"}");
                 return;
             }
 
@@ -179,6 +217,37 @@ public final class Main {
         for (long place = divisor / 10; place >= 1; place /= 10) {
             out.append((scaled / place) % 10);
         }
+    }
+
+    /**
+     * The client identity the rate limiter keys on. Direct connections use the socket
+     * address. Behind the reverse proxy that terminates TLS on the public deployment,
+     * every socket is loopback — so for loopback connections only, the proxy's
+     * {@code X-Forwarded-For} is trusted. A remote client cannot spoof its way into
+     * that branch, because its socket address is not loopback.
+     */
+    private static String clientOf(HttpExchange exchange) {
+        java.net.InetAddress address = exchange.getRemoteAddress().getAddress();
+        if (address != null && address.isLoopbackAddress()) {
+            String forwarded = exchange.getRequestHeaders().getFirst("X-Forwarded-For");
+            if (forwarded != null && !forwarded.isBlank()) {
+                int comma = forwarded.indexOf(',');
+                return (comma < 0 ? forwarded : forwarded.substring(0, comma)).trim();
+            }
+        }
+        return address == null ? "unknown" : address.getHostAddress();
+    }
+
+    /** Reads at most {@code cap} bytes; null means the body was larger than that. */
+    private static byte[] readBounded(java.io.InputStream in, int cap) throws IOException {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream(8_192);
+        byte[] buffer = new byte[8_192];
+        int read;
+        while ((read = in.read(buffer)) > 0) {
+            if (out.size() + read > cap) return null;
+            out.write(buffer, 0, read);
+        }
+        return out.toByteArray();
     }
 
     private static void handleHealth(HttpExchange exchange) throws IOException {

@@ -33,6 +33,7 @@ TESTS := vdrst.align.AlignerEquivalenceTest \
          vdrst.align.ScoringSchemeTest \
          vdrst.blast.BlastOutputParserTest \
          vdrst.blast.BlastRunnerTest \
+         vdrst.http.RateLimiterTest \
          vdrst.index.KmerPrefilterTest \
          vdrst.service.SearchServiceTest \
          vdrst.service.ConcurrentSearchTest

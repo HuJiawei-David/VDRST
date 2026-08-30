@@ -2,7 +2,7 @@ package vdrst.service;
 
 import vdrst.align.Aligner;
 import vdrst.align.Nucleotides;
-import vdrst.align.VectorGotohAligner;
+import vdrst.align.ShortGotohAligner;
 import vdrst.index.Candidate;
 import vdrst.index.Prefilter;
 
@@ -40,7 +40,7 @@ public final class SearchService {
     private final int candidateLimit;
 
     public SearchService(Prefilter prefilter) {
-        this(prefilter, new VectorGotohAligner(), DEFAULT_RESULT_LIMIT, DEFAULT_CANDIDATE_LIMIT);
+        this(prefilter, new ShortGotohAligner(), DEFAULT_RESULT_LIMIT, DEFAULT_CANDIDATE_LIMIT);
     }
 
     public SearchService(Prefilter prefilter, Aligner aligner, int resultLimit, int candidateLimit) {

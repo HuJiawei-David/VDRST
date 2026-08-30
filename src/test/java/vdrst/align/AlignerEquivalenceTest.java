@@ -34,6 +34,7 @@ public final class AlignerEquivalenceTest {
         return List.of(
                 GotohAligner::new,
                 VectorGotohAligner::new,
+                ShortGotohAligner::new,
                 scoring -> new BandedGotohAligner(scoring, 10_000));
     }
 
@@ -79,6 +80,43 @@ public final class AlignerEquivalenceTest {
                 }
             }
         }
+    }
+
+    @Test("the mask-free 16-bit kernel is exact at pipeline sizes and lane boundaries")
+    public void shortKernelExactAtRealSizes() {
+        // The 16-bit aligner lets its last vector overhang each anti-diagonal instead of
+        // masking it. The proof that overhang lanes are harmless lives in its javadoc;
+        // this is the check that the proof survives contact with real dimensions — the
+        // 300x428 shape the prefilter actually produces, and lengths one either side of
+        // every plausible lane count, where an off-by-one in the overhang would bite.
+        SplittableRandom rng = new SplittableRandom(SEED + 5);
+        ScoringScheme scoring = ScoringScheme.prefilter();
+        Aligner oracle = new GotohAligner(scoring);          // itself proven against the reference
+        Aligner simd = new ShortGotohAligner(scoring);
+
+        int[] lengths = {7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 300, 428};
+        for (int m : lengths) {
+            for (int n : lengths) {
+                byte[] q = randomSequence(rng, m);
+                byte[] s = randomSequence(rng, n);
+                Assert.equal(oracle.score(q, s), simd.score(q, s),
+                        "16-bit kernel disagreed at " + m + "x" + n);
+            }
+        }
+
+        // With N sprinkled in, since the kernel recodes N to decide a match in one compare.
+        for (int trial = 0; trial < 60; trial++) {
+            byte[] q = randomSequenceWithN(rng, 200 + rng.nextInt(240));
+            byte[] s = randomSequenceWithN(rng, 200 + rng.nextInt(240));
+            Assert.equal(oracle.score(q, s), simd.score(q, s),
+                    "16-bit kernel disagreed on a sequence containing N, trial " + trial);
+        }
+    }
+
+    private static byte[] randomSequenceWithN(SplittableRandom rng, int length) {
+        byte[] out = new byte[length];
+        for (int i = 0; i < length; i++) out[i] = (byte) rng.nextInt(5);   // includes N
+        return out;
     }
 
     @Test("alignment is symmetric: swapping query and subject does not change the score")

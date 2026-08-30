@@ -2,7 +2,7 @@ package vdrst.http;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
-import vdrst.align.VectorGotohAligner;
+import vdrst.align.ShortGotohAligner;
 import vdrst.index.GenomeStore;
 import vdrst.index.KmerIndex;
 import vdrst.index.KmerPrefilter;
@@ -68,7 +68,7 @@ public final class Main {
         KmerIndex index = KmerIndex.build(store, k, stride);
         System.out.printf("  ready in %.1f s, index %,.0f MB%n",
                 (System.nanoTime() - started) / 1e9, index.approximateBytes() / 1048576.0);
-        System.out.println("  vectors: " + VectorGotohAligner.speciesDescription());
+        System.out.println("  vectors: " + ShortGotohAligner.speciesDescription());
 
         Prefilter prefilter = new KmerPrefilter(index);
         SearchService service = new SearchService(prefilter);

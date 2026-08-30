@@ -43,6 +43,20 @@ public final class SequenceValidator {
      * @throws InvalidRequestException with a message safe to return to the caller
      */
     public static String validate(String raw) {
+        return validate(raw, MAX_LENGTH);
+    }
+
+    /**
+     * @param maxLength the ceiling this caller enforces, which a public deployment sets
+     *                  below {@link #MAX_LENGTH}. Alignment cost grows with the square of
+     *                  the query — a 16,000-base query is about ten times the work of a
+     *                  5,000-base one — so the ceiling is what keeps a single request
+     *                  from being a denial-of-service primitive. It is checked against
+     *                  the cleaned sequence, because that is what gets aligned; checking
+     *                  the raw string with slop for headers lets a query through at
+     *                  whatever the slop is, which is how this was wrong before.
+     */
+    public static String validate(String raw, int maxLength) {
         if (raw == null || raw.isBlank()) {
             throw new InvalidRequestException("sequence must not be empty");
         }
@@ -61,9 +75,9 @@ public final class SequenceValidator {
                     + " bases, got " + sequence.length()
                     + " — shorter queries match this much sequence by chance");
         }
-        if (sequence.length() > MAX_LENGTH) {
+        if (sequence.length() > maxLength) {
             throw new InvalidRequestException(
-                    "sequence must be at most " + MAX_LENGTH + " bases, got " + sequence.length());
+                    "sequence must be at most " + maxLength + " bases, got " + sequence.length());
         }
 
         try {

@@ -26,6 +26,32 @@ public final class SearchServiceTest {
         }
     }
 
+    @Test("a deployment's query cap is enforced on the cleaned sequence")
+    public void deploymentCapIsEnforced() {
+        // The public deployment caps queries because alignment cost grows with the square
+        // of the query: 16,000 bases measured just under two seconds of CPU on the live
+        // service, which is a denial-of-service primitive dressed as a search. The first
+        // version of this cap compared the *raw* request string against the limit plus
+        // slop for FASTA headers, so a 16,000-base query sailed through a 10,000-base
+        // cap. It is the cleaned sequence that gets aligned, so it is the cleaned
+        // sequence that must be measured.
+        try (Prefilter runner = TestCorpus.prefilter()) {
+            SearchService capped = new SearchService(runner).maxQueryLength(1_000);
+
+            StringBuilder oversized = new StringBuilder(">a header that used to buy slop\n");
+            for (int i = 0; i < 400; i++) oversized.append("ACGTACGTAC\n");   // 4,000 bases
+
+            Assert.throwsException(SequenceValidator.InvalidRequestException.class,
+                    () -> capped.search(oversized.toString()),
+                    "a 4,000-base query was accepted under a 1,000-base cap");
+
+            // And the cap does not reject what it should accept.
+            StringBuilder fine = new StringBuilder();
+            for (int i = 0; i < 50; i++) fine.append("ACGTACGTAC");           // 500 bases
+            capped.search(fine.toString());
+        }
+    }
+
     @Test("results come back in descending score order")
     public void resultsAreSorted() {
         try (Prefilter runner = TestCorpus.prefilter()) {

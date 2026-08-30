@@ -80,7 +80,7 @@ public final class Main {
         System.out.println("  vectors: " + ShortGotohAligner.speciesDescription());
 
         Prefilter prefilter = new KmerPrefilter(index);
-        SearchService service = new SearchService(prefilter);
+        SearchService service = new SearchService(prefilter).maxQueryLength(maxQuery);
         RateLimiter limiter = rateLimit > 0
                 ? new RateLimiter(rateLimit, Math.max(5, rateLimit / 3))
                 : null;
@@ -161,11 +161,6 @@ public final class Main {
             String sequence = Json.readString(body, "sequence");
             if (sequence == null) {
                 respond(exchange, 400, "{\"error\":\"missing field \\\"sequence\\\"\"}");
-                return;
-            }
-            if (sequence.length() > maxQuery + 8_192) {
-                respond(exchange, 400, "{\"error\":\"this deployment accepts queries up to "
-                        + maxQuery + " bases\"}");
                 return;
             }
 

@@ -39,6 +39,20 @@ public final class SearchService {
     private final int resultLimit;
     private final int candidateLimit;
     private final boolean parallelAlign;
+    private int maxQueryLength = SequenceValidator.MAX_LENGTH;
+
+    /**
+     * Lowers the accepted query length for this deployment. Alignment cost grows with the
+     * square of the query, so this is the bound that decides what one request can cost.
+     */
+    public SearchService maxQueryLength(int bases) {
+        if (bases < SequenceValidator.MIN_LENGTH) {
+            throw new IllegalArgumentException("maxQueryLength must be at least "
+                    + SequenceValidator.MIN_LENGTH);
+        }
+        this.maxQueryLength = bases;
+        return this;
+    }
 
     public SearchService(Prefilter prefilter) {
         this(prefilter, new ShortGotohAligner(), DEFAULT_RESULT_LIMIT, DEFAULT_CANDIDATE_LIMIT);
@@ -76,7 +90,7 @@ public final class SearchService {
      * @throws SequenceValidator.InvalidRequestException if the sequence is not usable
      */
     public List<Match> search(String rawSequence) {
-        String sequence = SequenceValidator.validate(rawSequence);
+        String sequence = SequenceValidator.validate(rawSequence, maxQueryLength);
         byte[] query = Nucleotides.encode(sequence);
 
         List<Candidate> candidates = prefilter.candidates(query, candidateLimit);

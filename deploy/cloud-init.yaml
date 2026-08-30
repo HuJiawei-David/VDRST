@@ -1,0 +1,132 @@
+#cloud-config
+# Provisions a VDRST host from nothing: JDK, the real NCBI database, the service, TLS.
+#
+# The database is fetched on the VM rather than uploaded, because NCBI to an Azure
+# datacentre is a datacentre-speed transfer, while the same 560 MB from a laptop is a
+# home uplink. BLAST+ is installed for exactly one command -- the one-off FASTA export --
+# and nothing in VDRST uses it afterwards.
+
+package_update: true
+packages:
+  - openjdk-21-jdk-headless
+  - ncbi-blast+
+  - git
+  - make
+  - debian-keyring
+  - debian-archive-keyring
+  - apt-transport-https
+  - curl
+
+write_files:
+  # VDRST listens on loopback only; Caddy terminates TLS in front of it. So the search
+  # endpoint is never directly exposed, and X-Forwarded-For arrives over loopback, which
+  # is the one path the rate limiter trusts it on.
+  - path: /etc/systemd/system/vdrst.service
+    content: |
+      [Unit]
+      Description=VDRST viral sequence search
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      User=vdrst
+      WorkingDirectory=/opt/vdrst/VDRST
+      # G1, not SerialGC: the heap holds a ~1.9 GB live index, and a serial full
+      # collection over that is a multi-second pause in a service that answers in
+      # under a millisecond. Steady-state search allocates almost nothing, so the
+      # collector should stay out of the way -- and when it does run, stay brief.
+      ExecStart=/usr/bin/java --add-modules jdk.incubator.vector \
+        -Xms2600m -Xmx2600m -XX:MaxGCPauseMillis=50 \
+        -cp target/classes vdrst.http.Main \
+        --db /opt/vdrst/data/ref_viruses.fasta \
+        --k 13 --stride 2 \
+        --port 9090 \
+        --rate-limit 30 --max-query 10000
+      # The index takes ~30 s to build before the port opens; systemd must not give up.
+      TimeoutStartSec=900
+      Restart=always
+      RestartSec=10
+      NoNewPrivileges=true
+      PrivateTmp=true
+      ProtectSystem=strict
+      ProtectHome=true
+
+      [Install]
+      WantedBy=multi-user.target
+
+  # TLS and the reverse proxy. Caddy obtains and renews a Let's Encrypt certificate for
+  # the Azure DNS name on its own -- cloudapp.azure.com is on the Public Suffix List, so
+  # each VM's label counts as its own registered domain for issuance.
+  #
+  # Staged here rather than written straight to /etc/caddy/Caddyfile: a config file that
+  # already exists when the package is unpacked is a dpkg conffile conflict, and dpkg
+  # asks about it interactively, which on a machine with nobody at the keyboard is a
+  # failed install. setup.sh copies it into place after the package is in.
+  - path: /opt/vdrst/Caddyfile
+    content: |
+      vdrst-hujiawei.australiaeast.cloudapp.azure.com {
+          encode gzip
+          reverse_proxy localhost:9090
+      }
+
+  - path: /opt/vdrst/setup.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Idempotent: safe to re-run, skips whatever is already done.
+      set -euo pipefail
+      exec > >(tee -a /var/log/vdrst-setup.log) 2>&1
+      echo "=== VDRST setup starting $(date -Is) ==="
+
+      # 2 GB of swap. The index build peaks near the heap ceiling on a 4 GiB machine,
+      # and swap is the difference between a slow minute and an OOM kill. Steady-state
+      # search touches the whole index, so this is insurance, not working memory.
+      if [ ! -f /swapfile ]; then
+        fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+        echo '/swapfile none swap sw 0 0' >> /etc/fstab
+      fi
+
+      # Caddy is not in Ubuntu's archive; it ships its own repository.
+      if ! command -v caddy >/dev/null; then
+        curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
+          | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+        curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt \
+          > /etc/apt/sources.list.d/caddy-stable.list
+        apt-get update -q
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
+          -o Dpkg::Options::=--force-confold caddy
+      fi
+      install -D -m 644 /opt/vdrst/Caddyfile /etc/caddy/Caddyfile
+
+      id vdrst &>/dev/null || useradd --system --home /opt/vdrst --shell /usr/sbin/nologin vdrst
+      mkdir -p /opt/vdrst/data
+      cd /opt/vdrst
+
+      if [ ! -d VDRST ]; then
+        git clone --depth 1 https://github.com/HuJiawei-David/VDRST.git
+      fi
+      cd VDRST && make build && cd ..
+
+      # The real database: BLAST volumes straight from NCBI, exported once to FASTA.
+      # Fetched with curl rather than update_blastdb.pl, which Ubuntu's ncbi-blast+
+      # package does not ship -- one less thing that has to exist for this to work.
+      if [ ! -s data/ref_viruses.fasta ]; then
+        cd data
+        curl -fL --retry 5 --retry-delay 5 -O \
+          https://ftp.ncbi.nlm.nih.gov/blast/db/ref_viruses_rep_genomes.tar.gz
+        tar xzf ref_viruses_rep_genomes.tar.gz
+        blastdbcmd -db ref_viruses_rep_genomes -entry all -out ref_viruses.fasta
+        # The BLAST volumes are gigabytes and nothing needs them once exported.
+        rm -f ref_viruses_rep_genomes.* ref_viruses_rep_genomes.tar.gz
+        cd ..
+      fi
+
+      chown -R vdrst:vdrst /opt/vdrst
+      systemctl daemon-reload
+      systemctl enable --now vdrst
+      systemctl reload-or-restart caddy || true
+      echo "=== VDRST setup done $(date -Is) ==="
+
+runcmd:
+  - [ bash, /opt/vdrst/setup.sh ]

@@ -180,6 +180,17 @@ then the 2009 pandemic H1N1:
 300 bases of HIV-1 return HIV-1 at the maximum score, then HIV-2, then SIV — the
 neighbourhood a virologist would draw by hand.
 
+And the interface, mid-query:
+
+![Searching the real database for 60 bases of phiX174](docs/ui-real-database.png)
+
+<sub>60 bases of phiX174 — the first genome ever sequenced — against the full real
+database: 0.27 ms for this request. A single 60-base query is about a fifth of the
+benchmark's 300-base standard, which is why one observation can land under the 0.32 ms
+median; the tables above quote medians over 2,000 runs, never single observations like
+this one. The note under the results is the interface itself flagging that a query this
+short finds matches by chance.</sub>
+
 ### What real data broke
 
 The synthetic corpus is seeded, uniform and polite. NCBI's database is none of those

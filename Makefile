@@ -37,7 +37,7 @@ TESTS := vdrst.align.AlignerEquivalenceTest \
          vdrst.service.SearchServiceTest \
          vdrst.service.ConcurrentSearchTest
 
-.PHONY: all build test bench clean corpus run fasta doctor
+.PHONY: all build test bench bench-kernels clean corpus run fasta doctor
 
 all: test
 
@@ -67,6 +67,10 @@ test: $(TEST_OUT) $(CI_CORPUS)
 
 bench: $(BENCH_OUT) $(BENCH_CORPUS)
 	@java $(VECTOR) $(BENCH_OPTS) -cp $(OUT):$(BENCH_OUT) vdrst.bench.BenchmarkMain $(ARGS)
+
+# The alignment kernels alone, at pipeline shape — the per-kernel table in README.md.
+bench-kernels: $(BENCH_OUT)
+	@java $(VECTOR) $(BENCH_OPTS) -cp $(OUT):$(BENCH_OUT) vdrst.bench.KernelBench
 
 # make corpus                                  the benchmark corpus (500 genomes)
 # make corpus ARGS="--scale CI --out somewhere" anything else

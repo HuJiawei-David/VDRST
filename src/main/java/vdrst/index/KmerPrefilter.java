@@ -61,22 +61,39 @@ public final class KmerPrefilter implements Prefilter {
     public KmerPrefilter(KmerIndex index, int maxOccurrences) {
         this.index = index;
         this.maxOccurrences = maxOccurrences;
-        this.scratch = ThreadLocal.withInitial(Scratch::new);
+        final int genomes = index.store().count();
+        this.scratch = ThreadLocal.withInitial(() -> new Scratch(genomes));
     }
 
     private static final class Scratch {
         int[] kmers = new int[1024];
-        final DiagonalAccumulator diagonals;
+        final DiagonalAccumulator diagonals = new DiagonalAccumulator(4096);
 
-        Scratch() {
-            // Sized for the worst case a bounded scan can produce: every query k-mer
-            // landing on its own diagonal, at the occurrence ceiling.
-            this.diagonals = new DiagonalAccumulator(4096);
+        // Qualifying hits, dense: hitKeys[i] packs (count, arrival order) for sorting,
+        // hitSlots[order] remembers which accumulator slot the order-th hit came from.
+        long[] hitKeys = new long[1024];
+        int[] hitSlots = new int[1024];
+
+        // Which genomes this query has already returned, without allocating per query:
+        // a slot from an older generation reads as unseen, exactly like the accumulator.
+        final int[] genomeSeen;
+        int genomeGeneration;
+
+        Scratch(int genomes) {
+            this.genomeSeen = new int[genomes];
         }
 
         int[] kmers(int needed) {
             if (kmers.length < needed) kmers = new int[Integer.highestOneBit(needed - 1) << 1];
             return kmers;
+        }
+
+        void sizeHits(int needed) {
+            if (hitKeys.length < needed) {
+                int size = Integer.highestOneBit(needed - 1) << 1;
+                hitKeys = new long[size];
+                hitSlots = new int[size];
+            }
         }
     }
 
@@ -106,45 +123,63 @@ public final class KmerPrefilter implements Prefilter {
             }
         }
 
-        return selectBest(query, diagonals, limit);
+        return selectBest(query, local, limit);
     }
 
     /**
-     * Walks the accumulator, keeps the strongest diagonal per genome, and returns the
-     * best few. Genome resolution is a binary search, so it happens here — once per
-     * surviving diagonal — rather than once per seed hit.
+     * Walks the live diagonals, keeps the strongest per genome, and returns the best few.
+     *
+     * <p>Everything here is a constant factor, and all of them used to be paid per query:
+     * a scan over the accumulator's whole capacity rather than its live entries, a record
+     * allocated per surviving diagonal, a comparator sort over those records, and a fresh
+     * {@code boolean[]} the size of the genome count for de-duplication — 18 KB per query
+     * against a real database. Hits are now packed into reused {@code long}s, sorted as
+     * primitives, and walked from the top; genome resolution stays a binary search but
+     * happens only for the walked prefix, not for every surviving diagonal.
      */
-    private List<Candidate> selectBest(byte[] query, DiagonalAccumulator diagonals, int limit) {
-        GenomeStore store = index.store();
+    private List<Candidate> selectBest(byte[] query, Scratch local, int limit) {
+        final GenomeStore store = index.store();
+        final DiagonalAccumulator diagonals = local.diagonals;
+        final int live = diagonals.occupiedSlots();
 
-        record Hit(int genome, int diagonal, int count, int queryOffset) {}
-        List<Hit> hits = new ArrayList<>();
+        local.sizeHits(live);
+        final long[] hitKeys = local.hitKeys;
+        final int[] hitSlots = local.hitSlots;
+        int n = 0;
 
-        for (int slot = 0; slot < diagonals.capacity(); slot++) {
-            if (!diagonals.isLive(slot) || diagonals.countAt(slot) < MIN_SEEDS) continue;
+        for (int i = 0; i < live; i++) {
+            int slot = diagonals.liveSlotAt(i);
+            int count = diagonals.countAt(slot);
+            if (count < MIN_SEEDS) continue;
 
-            int diagonal = diagonals.diagonalAt(slot);
-            int anchor = diagonal + diagonals.queryOffsetAt(slot);
+            int anchor = diagonals.diagonalAt(slot) + diagonals.queryOffsetAt(slot);
             if (anchor < 0 || anchor >= store.totalBases()) continue;
 
-            hits.add(new Hit(store.genomeAt(anchor), diagonal,
-                    diagonals.countAt(slot), diagonals.queryOffsetAt(slot)));
+            // Sorts ascending as (count, then later arrivals first), so the descending
+            // walk below sees higher counts first and, within a count, earlier arrivals
+            // first — the same order the old stable sort produced.
+            hitKeys[n] = ((long) count << 32) | (0xFFFF_FFFFL - n);
+            hitSlots[n] = slot;
+            n++;
         }
 
-        hits.sort((a, b) -> Integer.compare(b.count(), a.count()));
+        Arrays.sort(hitKeys, 0, n);
 
-        List<Candidate> candidates = new ArrayList<>(Math.min(limit, hits.size()));
-        boolean[] seen = new boolean[store.count()];
+        List<Candidate> candidates = new ArrayList<>(Math.min(limit, n));
+        final int generation = ++local.genomeGeneration;
 
-        for (Hit hit : hits) {
-            if (candidates.size() == limit) break;
-            if (seen[hit.genome()]) continue;
-            seen[hit.genome()] = true;
+        for (int i = n - 1; i >= 0 && candidates.size() < limit; i--) {
+            int slot = hitSlots[(int) (0xFFFF_FFFFL - (hitKeys[i] & 0xFFFF_FFFFL))];
+            int diagonal = diagonals.diagonalAt(slot);
+            int genome = store.genomeAt(diagonal + diagonals.queryOffsetAt(slot));
 
-            int genomeStart = store.start(hit.genome());
-            int genomeLength = store.length(hit.genome());
+            if (local.genomeSeen[genome] == generation) continue;
+            local.genomeSeen[genome] = generation;
 
-            int windowStart = hit.diagonal() - genomeStart - WINDOW_MARGIN;
+            int genomeStart = store.start(genome);
+            int genomeLength = store.length(genome);
+
+            int windowStart = diagonal - genomeStart - WINDOW_MARGIN;
             int windowEnd = windowStart + query.length + 2 * WINDOW_MARGIN;
             windowStart = Math.max(0, windowStart);
             windowEnd = Math.min(genomeLength, windowEnd);
@@ -154,8 +189,8 @@ public final class KmerPrefilter implements Prefilter {
                     store.bases(), genomeStart + windowStart, genomeStart + windowEnd);
 
             candidates.add(new Candidate(
-                    store.id(hit.genome()), store.title(hit.genome()),
-                    genomeLength, windowStart, window, hit.count()));
+                    store.id(genome), store.title(genome),
+                    genomeLength, windowStart, window, diagonals.countAt(slot)));
         }
 
         return candidates;

@@ -44,6 +44,14 @@ public final class DiagonalAccumulator {
     private int[] generations;
     private int[] bestQueryOffset;
 
+    /**
+     * The slots claimed this generation, in the order they were claimed. Readers walk
+     * this instead of scanning the whole capacity: after the table has grown for a heavy
+     * query, a typical query occupies a few hundred slots of a table sized for a hundred
+     * thousand, and a full-capacity scan would pay the worst case on every query.
+     */
+    private int[] liveSlots;
+
     private int generation;
     private int occupied;
 
@@ -62,6 +70,7 @@ public final class DiagonalAccumulator {
         this.counts = new int[capacity];
         this.generations = new int[capacity];
         this.bestQueryOffset = new int[capacity];
+        this.liveSlots = new int[capacity];
     }
 
     public int capacity() { return keys.length; }
@@ -95,7 +104,7 @@ public final class DiagonalAccumulator {
                 keys[slot] = diagonal;
                 counts[slot] = 1;
                 bestQueryOffset[slot] = queryOffset;
-                occupied++;
+                liveSlots[occupied++] = slot;
                 return;
             }
             if (keys[slot] == diagonal) {
@@ -107,28 +116,34 @@ public final class DiagonalAccumulator {
         }
     }
 
-    /** Doubles the table and reinserts the live entries. Dead generations stay behind. */
+    /**
+     * Doubles the table and reinserts the live entries — walked in claim order, so the
+     * order {@link #liveSlotAt} reports survives the rehash. Dead generations stay behind.
+     */
     private void grow() {
-        int[] oldKeys = keys, oldCounts = counts, oldGenerations = generations;
-        int[] oldOffsets = bestQueryOffset;
-        int oldGeneration = generation;
+        int[] oldKeys = keys, oldCounts = counts, oldOffsets = bestQueryOffset;
+        int[] oldLive = liveSlots;
 
         allocate(oldKeys.length << 1);
         generation = 1;                                      // fresh arrays are all zero
 
-        for (int old = 0; old < oldKeys.length; old++) {
-            if (oldGenerations[old] != oldGeneration) continue;
+        for (int i = 0; i < occupied; i++) {
+            int old = oldLive[i];
             int slot = mix(oldKeys[old]) & mask;
             while (generations[slot] == generation) slot = (slot + 1) & mask;
             generations[slot] = generation;
             keys[slot] = oldKeys[old];
             counts[slot] = oldCounts[old];
             bestQueryOffset[slot] = oldOffsets[old];
+            liveSlots[i] = slot;
         }
     }
 
     /** True when this slot holds an entry written during the current generation. */
     public boolean isLive(int slot) { return generations[slot] == generation; }
+
+    /** The {@code i}-th slot claimed this generation, for {@code i < occupiedSlots()}. */
+    public int liveSlotAt(int i) { return liveSlots[i]; }
 
     public int diagonalAt(int slot) { return keys[slot] << DIAGONAL_BIN_SHIFT; }
 

@@ -8,9 +8,10 @@ genomes, 552 million bases — on a plain M1 laptop. That is 30x faster than v2.
 same machine; on the reproducible synthetic corpus, the full benchmark ladder spans
 68,333x from the unfiltered baseline.
 
-Live against the real database — all 18,802 genomes and 554,893,834 bases of NCBI's
-current `ref_viruses_rep_genomes`, indexed in memory. Paste a few hundred bases of any
-viral sequence, or borrow one from the examples below.
+A public instance ran on Azure against the real database — all 18,802 genomes and
+554,893,834 bases of NCBI's current `ref_viruses_rep_genomes`, indexed in memory. It is
+offline now that its cloud budget has run out; `make run` serves the same search page
+locally, and [`deploy/cloud-init.yaml`](#deploying-it) rebuilds the public host from nothing.
 
 Written in 2024 as my first project. Rebuilt in 2026 with benchmarks, tests, and
 [a written retrospective](RETROSPECTIVE.md) of everything the first version got wrong. The
@@ -162,8 +163,9 @@ is 0.48 ms and the rest is HTTP, JSON and loopback.
 
 ### On the public deployment
 
-The live service runs the same code on a 2-vCPU Azure VM in Australia East, and reports
-its own server-side time in every response. Measured from a laptop in New Zealand:
+While it was up, the public service ran the same code on a 2-vCPU Azure VM in Australia
+East (now offline), and reported its own server-side time in every response. Measured
+from a laptop in New Zealand:
 
 | | |
 |---|---:|
@@ -183,16 +185,16 @@ the 16-bit kernel gets **16 lanes per vector instead of the M1's 8**. Same sourc
 `ShortGotohAligner`, twice the lanes — which is the payoff for the maskless design that
 this page's benchmarks section is mostly about.
 
-The public deployment is bounded, because a search is priced in CPU and a public URL
+The public deployment was bounded, because a search is priced in CPU and a public URL
 attracts more than curiosity — the machine's first scanner probe arrived within twelve
-minutes of the port opening, looking for WordPress endpoints. It answers 30 requests per
-minute per client and caps queries at 5,000 bases; both are flags, and both default to
+minutes of the port opening, looking for WordPress endpoints. It answered 30 requests per
+minute per client and capped queries at 5,000 bases; both are flags, and both default to
 off, because a service on localhost has no door to guard.
 
 ### Three real answers
 
 The reason to run against real data is that correctness claims get teeth. Three queries,
-three correct phylogenetic neighbourhoods, straight from the running service:
+three correct phylogenetic neighbourhoods, straight from the public service while it was up:
 
 A SARS-CoV-2 fragment returns SARS-CoV-2, then SARS, then a bat sarbecovirus:
 
@@ -382,7 +384,7 @@ has 9,885 in the December 2024 volumes and 10,197 in the current ones — and fo
 them out of the index without pretending to know which base they were. The count is
 reported at startup. Query-side validation stays strict.
 
-**The public deployment is bounded.** 30 requests per minute per client, queries capped at
+**The public deployment was bounded.** 30 requests per minute per client, queries capped at
 5,000 bases. Alignment cost grows with the square of the query, so an uncapped 16,000-base
 request measured close to two seconds of CPU on the live service. Both bounds are flags
 and both default to off; a private instance has neither.

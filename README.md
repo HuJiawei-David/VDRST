@@ -8,8 +8,6 @@ genomes, 552 million bases — on a plain M1 laptop. That is 30x faster than v2.
 same machine; on the reproducible synthetic corpus, the full benchmark ladder spans
 68,333x from the unfiltered baseline.
 
-### [Try it →  vdrst-hujiawei.australiaeast.cloudapp.azure.com](https://vdrst-hujiawei.australiaeast.cloudapp.azure.com)
-
 Live against the real database — all 18,802 genomes and 554,893,834 bases of NCBI's
 current `ref_viruses_rep_genomes`, indexed in memory. Paste a few hundred bases of any
 viral sequence, or borrow one from the examples below.
